@@ -1,6 +1,22 @@
 from opendbc.car.mazda.values import Buttons, MazdaFlags
 
 
+def mazda2019_checksum(address: int, sig, d: bytearray) -> int:
+  # Mazda 2019 (GEN2) / 2023 (GEN3) CHECKSUM. Ported 1:1 from
+  # opendbc/can/common.cc:mazda2019_checksum (source fork). The two known addresses with a
+  # non-zero seed are EPS_LKAS (0x249) and the 0x220 ACC frame; all other CHECKSUM-bearing
+  # addresses start from zero. The payload bytes 0..6 are summed; byte 7 (where CHECKSUM
+  # lives, per mazda_2019.dbc) is excluded.
+  checksum = 0
+  if address == 0x220:
+    checksum = 0x2a
+  if address == 0x249:
+    checksum = 0x53
+  for i in range(7):
+    checksum += d[i]
+  return checksum & 0xFF
+
+
 def create_steering_control(packer, CP, frame, apply_torque, lkas):
 
   tmp = apply_torque + 2048
@@ -134,13 +150,10 @@ def create_steering_control_gen2(packer, apply_torque):
   # for GEN2 + TI hardware: panda safety treats addr 0x249 on bus 1 as MAZDA_TI_LKAS.
   # Counter (8-bit COUNTER signal) is auto-incremented by CANPacker.
   #
-  # NOTE: The mazda_2019 DBC defines a CHECKSUM signal that the source fork computes via
-  # the C++ packer's mazda2019_checksum hook (opendbc/can/common.cc). Upstream's pure-Python
-  # CANPacker does not yet register a Mazda 2019 checksum function in opendbc/can/dbc.py's
-  # get_checksum_state(), so CHECKSUM will currently pack as 0. A follow-up task is required
-  # to add a Python mazda2019_checksum and wire it into get_checksum_state() before this
-  # builder will be accepted by the EPS at runtime. The builder itself is ported 1:1 from
-  # selfdrive/car/mazda/mazdacan.py:create_steering_control GEN2 branch and does not change.
+  # CHECKSUM is auto-filled by CANPacker via mazda2019_checksum (registered in
+  # opendbc/can/dbc.py:get_checksum_state for the mazda_2019 DBC family); the algorithm is
+  # ported 1:1 from the source fork's opendbc/can/common.cc. The builder itself is ported
+  # 1:1 from selfdrive/car/mazda/mazdacan.py:create_steering_control GEN2 branch.
   values = {
     "LKAS_REQUEST": apply_torque,
     "STEER_FEEL": 10000,
