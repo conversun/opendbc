@@ -30,6 +30,13 @@ class CarState(CarStateBase):
     self.params = _CtrlLimits(CP)
     self._prev_steering_angle = 0.0
 
+    # T11 carcontroller reads `self.ti_state` and `self.acc_values` once per
+    # cycle, so they MUST exist before the first update() call. Defaults are
+    # safe: TI inactive, no ACC frame seen yet — only RESUME/HOLD/ACC_ENABLED
+    # are stubbed because those are the keys T11 dereferences during gating.
+    self.ti_state = TI_STATE.OFF
+    self.acc_values: dict = {"RESUME": 0, "HOLD": 0, "ACC_ENABLED": 0}
+
   def update(self, can_parsers) -> structs.CarState:
     if self.CP.flags & MazdaFlags.GEN2:
       return self._update_gen2(can_parsers)
@@ -202,6 +209,16 @@ class CarState(CarStateBase):
     )
     ret.steerFaultPermanent = any(int(state) != TI_STATE.RUN for state in cpu_states)
 
+    # Collapse the 4-MCU vector into the opendbc TI_STATE enum that T11's
+    # carcontroller consumes. TI2 hardware values per firmware docs are
+    # 0=OFF, 1=INIT, 2=STANDBY, 3=DRIVE, 4=ERROR, 5=CRITICAL_ERROR; the
+    # opendbc TI_STATE enum only has 4 values (DISCOVER=0, OFF=1,
+    # DRIVER_OVER=2, RUN=3). Hardware DRIVE coincides numerically with
+    # opendbc TI_STATE.RUN (both = 3) but the rest do not line up, so we
+    # collapse to a binary view: all four hall MCUs in DRIVE -> RUN, any
+    # other reading -> OFF. T11 only branches on RUN-vs-not-RUN.
+    self.ti_state = TI_STATE.RUN if all(int(state) == TI_STATE.RUN for state in cpu_states) else TI_STATE.OFF
+
     # Throttle / brake. GEN2 ENGINE_DATA on the camera bus carries the gas pedal;
     # brake comes back as a binary signal on BRAKE_PEDAL (no analog pressure
     # available without the higher-rate BRAKE_PEDAL_SLOW message, which we skip
@@ -223,6 +240,14 @@ class CarState(CarStateBase):
     # (cruise will not engage if either is unsafe), so surface a clean state.
     ret.seatbeltUnlatched = False
     ret.doorOpen = False
+
+    # Snapshot the ACC frame for T11's carcontroller (it gates resume/hold
+    # echoes off the OEM ACC ECU). The frame is parsed on Bus.pt per
+    # get_can_parsers (matching the source fork's `self.acc = copy.copy(
+    # cp.vl["ACC"])` — the panda forwards the camera-originated ACC frame
+    # down to bus 0 where it is most reliably visible). dict() snapshot
+    # decouples the consumer from the next CAN tick's vl rebind.
+    self.acc_values = dict(cp.vl["ACC"])
 
     return ret
 
