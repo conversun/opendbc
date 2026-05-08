@@ -11,13 +11,31 @@
 #define MAZDA_ENGINE_DATA   0x202U
 #define MAZDA_PEDALS        0x165U
 
+#define MAZDA_2019_BRAKE          0x43FU
+#define MAZDA_2019_GAS            0x202U
+#define MAZDA_2019_CRUISE         0x44AU
+#define MAZDA_2019_WHEEL_SPEEDS   0x215U
+#define MAZDA_2019_SPEED          0x217U
+#define MAZDA_2019_STEER_TORQUE   0x24BU
+#define MAZDA_2019_CRZ_BTNS       0x09DU
+#define MAZDA_2019_ACC            0x220U
+#define MAZDA_TI_LKAS             0x249U
+
 // CAN bus numbers
 #define MAZDA_MAIN 0
+#define MAZDA_AUX  1
 #define MAZDA_CAM  2
+
+// param flag masks
+#define FLAG_MAZDA_GEN2 2U
+#define FLAG_MAZDA_TORQUE_INTERCEPTOR 8U
+
+static bool mazda_gen2 = false;
+static bool mazda_torque_interceptor = false;
 
 // track msgs coming from OP so that we know what CAM msgs to drop and what to forward
 static void mazda_rx_hook(const CANPacket_t *msg) {
-  if ((int)msg->bus == MAZDA_MAIN) {
+  if (!mazda_gen2 && ((int)msg->bus == MAZDA_MAIN)) {
     if (msg->addr == MAZDA_ENGINE_DATA) {
       // sample speed: scale by 0.01 to get kph
       int speed = (msg->data[2] << 8) | msg->data[3];
@@ -44,6 +62,47 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
       brake_pressed = (msg->data[0] & 0x10U);
     }
   }
+
+  if (mazda_gen2) {
+    if ((int)msg->bus == MAZDA_MAIN) {
+      if (msg->addr == MAZDA_2019_BRAKE) {
+        brake_pressed = (msg->data[5] & 0x4U) != 0U;
+      }
+
+      if (msg->addr == MAZDA_2019_CRUISE) {
+        acc_main_on = true;
+        bool cruise_engaged = (msg->data[0] & 0x20U) != 0U;
+        bool pre_enable = (msg->data[0] & 0x40U) != 0U;
+        pcm_cruise_check(cruise_engaged || pre_enable);
+      }
+    }
+
+    if (((int)msg->bus == MAZDA_AUX) || (mazda_torque_interceptor && ((int)msg->bus == MAZDA_MAIN))) {
+      if (msg->addr == MAZDA_2019_STEER_TORQUE) {
+        int torque_driver_new = (int16_t)((msg->data[0] << 8) | msg->data[1]);
+        update_sample(&torque_driver, torque_driver_new);
+      }
+    }
+
+    if ((int)msg->bus == MAZDA_CAM) {
+      if (msg->addr == MAZDA_2019_GAS) {
+        gas_pressed = (msg->data[4] != 0U) || ((msg->data[5] & 0xC0U) != 0U);
+      }
+
+      if (msg->addr == MAZDA_2019_SPEED) {
+        // sample speed: scale by 0.01 to get kph
+        int speed = (msg->data[4] << 8) | msg->data[5];
+        vehicle_moving = speed > 10; // moving when speed > 0.1 kph
+        UPDATE_VEHICLE_SPEED(speed * 0.01 * KPH_TO_MS);
+      }
+
+      if (msg->addr == MAZDA_2019_WHEEL_SPEEDS) {
+        int speed = ((msg->data[0] << 8) | msg->data[1]) - 10000;
+        vehicle_moving = speed > 10; // moving when speed > 0.1 kph
+        UPDATE_VEHICLE_SPEED(speed * 0.01 * KPH_TO_MS);
+      }
+    }
+  }
 }
 
 static bool mazda_tx_hook(const CANPacket_t *msg) {
@@ -57,9 +116,19 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
     .type = TorqueDriverLimited,
   };
 
+  const TorqueSteeringLimits MAZDA_2019_STEERING_LIMITS = {
+    .max_torque = 8000,
+    .max_rate_up = 45,
+    .max_rate_down = 80,
+    .max_rt_delta = 1688,
+    .driver_torque_multiplier = 1,
+    .driver_torque_allowance = 1400,
+    .type = TorqueDriverLimited,
+  };
+
   bool tx = true;
   // Check if msg is sent on the main BUS
-  if (msg->bus == (unsigned char)MAZDA_MAIN) {
+  if (!mazda_gen2 && (msg->bus == (unsigned char)MAZDA_MAIN)) {
     // steer cmd checks
     if (msg->addr == MAZDA_LKAS) {
       int desired_torque = (((msg->data[0] & 0x0FU) << 8) | msg->data[1]) - 2048U;
@@ -80,11 +149,32 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  if (mazda_gen2 && (msg->bus == (unsigned char)MAZDA_AUX) && (msg->addr == MAZDA_TI_LKAS)) {
+    int desired_torque = (int16_t)((msg->data[0] << 8) | msg->data[1]);
+    if (steer_torque_cmd_checks(desired_torque, -1, MAZDA_2019_STEERING_LIMITS)) {
+      tx = false;
+    }
+  }
+
   return tx;
+}
+
+static bool mazda_fwd_hook(int bus_num, int addr) {
+  bool block = false;
+
+  if (mazda_gen2) {
+    block = addr == MAZDA_TI_LKAS;
+    if (bus_num == MAZDA_MAIN) {
+      block = block || (addr == MAZDA_2019_ACC);
+    }
+  }
+
+  return block;
 }
 
 static safety_config mazda_init(uint16_t param) {
   static const CanMsg MAZDA_TX_MSGS[] = {{MAZDA_LKAS, 0, 8, .check_relay = true}, {MAZDA_CRZ_BTNS, 0, 8, .check_relay = false}, {MAZDA_LKAS_HUD, 0, 8, .check_relay = true}};
+  static const CanMsg MAZDA_2019_TX_MSGS[] = {{MAZDA_TI_LKAS, 1, 8, .check_relay = true}, {MAZDA_2019_ACC, 2, 8, .check_relay = true}};
 
   static RxCheck mazda_rx_checks[] = {
     {.msg = {{MAZDA_CRZ_CTRL,     0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
@@ -94,12 +184,43 @@ static safety_config mazda_init(uint16_t param) {
     {.msg = {{MAZDA_PEDALS,       0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
 
-  SAFETY_UNUSED(param);
-  return BUILD_SAFETY_CFG(mazda_rx_checks, MAZDA_TX_MSGS);
+  static RxCheck mazda_2019_rx_checks[] = {
+    {.msg = {{MAZDA_2019_BRAKE,        0, 8, 20U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_GAS,          2, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_CRUISE,       0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_SPEED,        2, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true},
+             {MAZDA_2019_WHEEL_SPEEDS, 2, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }}},
+    {.msg = {{MAZDA_2019_STEER_TORQUE, 1, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_CRZ_BTNS,     0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+  };
+
+  static RxCheck mazda_2019_ti_rx_checks[] = {
+    {.msg = {{MAZDA_2019_BRAKE,        0, 8, 20U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_GAS,          2, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_CRUISE,       0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_SPEED,        2, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true},
+             {MAZDA_2019_WHEEL_SPEEDS, 2, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }}},
+    {.msg = {{MAZDA_2019_STEER_TORQUE, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true},
+             {MAZDA_2019_STEER_TORQUE, 1, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }}},
+    {.msg = {{MAZDA_2019_CRZ_BTNS,     0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+  };
+
+  mazda_gen2 = GET_FLAG(param, FLAG_MAZDA_GEN2);
+  mazda_torque_interceptor = GET_FLAG(param, FLAG_MAZDA_TORQUE_INTERCEPTOR);
+
+  safety_config ret;
+  if (mazda_gen2) {
+    ret = mazda_torque_interceptor ? BUILD_SAFETY_CFG(mazda_2019_ti_rx_checks, MAZDA_2019_TX_MSGS) : \
+                                    BUILD_SAFETY_CFG(mazda_2019_rx_checks, MAZDA_2019_TX_MSGS);
+  } else {
+    ret = BUILD_SAFETY_CFG(mazda_rx_checks, MAZDA_TX_MSGS);
+  }
+  return ret;
 }
 
 const safety_hooks mazda_hooks = {
   .init = mazda_init,
   .rx = mazda_rx_hook,
   .tx = mazda_tx_hook,
+  .fwd = mazda_fwd_hook,
 };
