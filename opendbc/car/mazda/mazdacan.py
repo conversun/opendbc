@@ -126,3 +126,34 @@ def create_button_cmd(packer, CP, counter, button):
     }
 
     return packer.make_can_msg("CRZ_BTNS", 0, values)
+
+
+def create_steering_control_gen2(packer, apply_torque):
+  # GEN2 LKAS over EPS_LKAS (addr 0x249) on bus 1 (MAZDA_AUX). Replaces stock LKAS for
+  # GEN2 platforms (e.g., MAZDA_3_2019). Same message also serves as the TI LKAS path
+  # for GEN2 + TI hardware: panda safety treats addr 0x249 on bus 1 as MAZDA_TI_LKAS.
+  # Counter (8-bit COUNTER signal) is auto-incremented by CANPacker.
+  #
+  # NOTE: The mazda_2019 DBC defines a CHECKSUM signal that the source fork computes via
+  # the C++ packer's mazda2019_checksum hook (opendbc/can/common.cc). Upstream's pure-Python
+  # CANPacker does not yet register a Mazda 2019 checksum function in opendbc/can/dbc.py's
+  # get_checksum_state(), so CHECKSUM will currently pack as 0. A follow-up task is required
+  # to add a Python mazda2019_checksum and wire it into get_checksum_state() before this
+  # builder will be accepted by the EPS at runtime. The builder itself is ported 1:1 from
+  # selfdrive/car/mazda/mazdacan.py:create_steering_control GEN2 branch and does not change.
+  values = {
+    "LKAS_REQUEST": apply_torque,
+    "STEER_FEEL": 10000,
+  }
+  return packer.make_can_msg("EPS_LKAS", 1, values)
+
+
+def create_acc_cmd(packer, values, hold, resume):
+  # GEN2 longitudinal command over ACC (addr 0x220) on bus 2 (MAZDA_CAM). Forwarded from
+  # the stock ACC values dict that carstate copied off the camera bus, with HOLD and RESUME
+  # overridden when ACC_ENABLED is set. Ported 1:1 from selfdrive/car/mazda/mazdacan.py:
+  # create_acc_cmd; the source took an unused `self` arg which is dropped here.
+  if values["ACC_ENABLED"]:
+    values["HOLD"] = hold
+    values["RESUME"] = resume
+  return packer.make_can_msg("ACC", 2, values)
