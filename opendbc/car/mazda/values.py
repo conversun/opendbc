@@ -129,7 +129,7 @@ class CAR(Platforms):
   MAZDA_3_2019 = MazdaPlatformConfig(
     [MazdaCarDocs("Mazda 3 2019-24")],
     MazdaCarSpecs(mass=3000 * CV.LB_TO_KG, wheelbase=2.725, steerRatio=18.8),
-    flags=MazdaFlags.GEN2 | MazdaFlags.TORQUE_INTERCEPTOR,
+    flags=MazdaFlags.GEN2,
   )
 
 
