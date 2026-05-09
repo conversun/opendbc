@@ -2764,6 +2764,21 @@
     ],
     "package": "Adaptive Cruise Control (ACC) & Lane Assist"
   },
+  "Mazda 3 2019-24": {
+    "platform": "MAZDA_3_2019",
+    "make": "Mazda",
+    "brand": "mazda",
+    "model": "3",
+    "year": [
+      "2019",
+      "2020",
+      "2021",
+      "2022",
+      "2023",
+      "2024"
+    ],
+    "package": "All"
+  },
   "Mazda CX-5 2022-25": {
     "platform": "MAZDA_CX5_2022",
     "make": "Mazda",
