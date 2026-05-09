@@ -99,8 +99,15 @@ class CarInterface(CarInterfaceBase):
     if candidate not in (CAR.MAZDA_CX5_2022,) and not (ret.flags & (MazdaFlags.GEN2 | MazdaFlags.TORQUE_INTERCEPTOR)):
       ret.minSteerSpeed = LKAS_LIMITS.DISABLE_SPEED * CV.KPH_TO_MS
 
-    ret.alphaLongitudinalAvailable = bool(ret.flags & MazdaFlags.GEN2)
-    ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
+    # TODO(mazda3-2019): alpha longitudinal is disabled until carcontroller writes
+    # ACCEL_CMD from CC.actuators.accel. Today we only echo the stock ACC frame and
+    # override HOLD/RESUME, which is insufficient for openpilot to actually drive
+    # gas/brake. Re-enable after porting the source fork's accel translation
+    #   raw_acc_output = (CC.actuators.accel * 200) + 2000
+    # into mazdacan.create_acc_cmd, gated on CC.longActive. Until then GEN2 uses
+    # stock MRCC for longitudinal and openpilot owns lateral only.
+    ret.alphaLongitudinalAvailable = False
+    ret.openpilotLongitudinalControl = False
 
     ret.centerToFront = ret.wheelbase * 0.41
 

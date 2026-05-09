@@ -194,20 +194,29 @@ class CarState(CarStateBase):
     ret.steeringPressed = abs(ret.steeringTorque) > self.params.STEER_DRIVER_ALLOWANCE
 
     # TI fault detection. mazda_2019.dbc folds the 4-MCU state vector into the
-    # EPS_FEEDBACK message (id 0x24B); each CPU_x_STATE is a 4-bit field. Values
-    # mirror the opendbc-side TI_STATE enum (DISCOVER=0, OFF=1, DRIVER_OVER=2,
-    # RUN=3); the underlying TI2 firmware additionally reserves higher values
-    # for ERROR / CRITICAL_ERROR. Any of the four hall-MCU states reading
-    # something other than RUN means the TI is no longer driving the column
-    # motor, which we surface as a permanent steer fault so controlsd disables
-    # LKAS at the next cycle.
+    # EPS_FEEDBACK message (id 0x24B); each CPU_x_STATE is a 4-bit field.
+    # TI2 firmware values per manufacturer docs:
+    #   0 = OFF, 1 = INIT, 2 = STANDBY, 3 = DRIVE, 4 = ERROR, 5 = CRITICAL_ERROR
+    #
+    # We split this into two openpilot-side faults:
+    #   - steerFaultPermanent: any CPU at ERROR (4) or CRITICAL_ERROR (5).
+    #     These latch and require an ignition cycle, matching how the TI2
+    #     firmware itself locks an MCU into bypass/silent until reset.
+    #   - steerFaultTemporary: any CPU not in DRIVE (3) without being permanent.
+    #     INIT and STANDBY occur during normal TI2 boot and resolve once all
+    #     four MCUs receive valid torque-sensor input; OFF means the TI module
+    #     is unpowered and recovers when power returns.
+    HW_DRIVE = 3
+    HW_ERROR = 4
     cpu_states = (
       cp_aux.vl["EPS_FEEDBACK"]["CPU_0_STATE"],
       cp_aux.vl["EPS_FEEDBACK"]["CPU_1_STATE"],
       cp_aux.vl["EPS_FEEDBACK"]["CPU_2_STATE"],
       cp_aux.vl["EPS_FEEDBACK"]["CPU_3_STATE"],
     )
-    ret.steerFaultPermanent = any(int(state) != TI_STATE.RUN for state in cpu_states)
+    ret.steerFaultPermanent = any(int(state) >= HW_ERROR for state in cpu_states)
+    ret.steerFaultTemporary = (any(int(state) != HW_DRIVE for state in cpu_states)
+                                and not ret.steerFaultPermanent)
 
     # Collapse the 4-MCU vector into the opendbc TI_STATE enum that T11's
     # carcontroller consumes. TI2 hardware values per firmware docs are
@@ -217,7 +226,7 @@ class CarState(CarStateBase):
     # opendbc TI_STATE.RUN (both = 3) but the rest do not line up, so we
     # collapse to a binary view: all four hall MCUs in DRIVE -> RUN, any
     # other reading -> OFF. T11 only branches on RUN-vs-not-RUN.
-    self.ti_state = TI_STATE.RUN if all(int(state) == TI_STATE.RUN for state in cpu_states) else TI_STATE.OFF
+    self.ti_state = TI_STATE.RUN if all(int(state) == HW_DRIVE for state in cpu_states) else TI_STATE.OFF
 
     # Throttle / brake. GEN2 ENGINE_DATA on the camera bus carries the gas pedal;
     # brake comes back as a binary signal on BRAKE_PEDAL (no analog pressure
