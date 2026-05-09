@@ -116,6 +116,9 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def _get_params_sp(stock_cp: structs.CarParams, ret: structs.CarParamsSP, candidate, fingerprint: dict[int, dict[int, int]],
                      car_fw: list[structs.CarParams.CarFw], alpha_long: bool, is_release_sp: bool, docs: bool) -> structs.CarParamsSP:
-    ret.intelligentCruiseButtonManagementAvailable = True
+    # ICBM uses CRZ_BTNS on bus 0 (GEN1 protocol). GEN2 uses a different button protocol
+    # and create_button_cmd returns None for GEN2, so ICBM is gated to GEN1 in carcontroller.
+    # Don't advertise availability for platforms where it can't run.
+    ret.intelligentCruiseButtonManagementAvailable = not bool(stock_cp.flags & MazdaFlags.GEN2)
 
     return ret
