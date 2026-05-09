@@ -1,6 +1,22 @@
 from opendbc.car.mazda.values import Buttons, MazdaFlags
 
 
+def mazda2019_checksum(address: int, sig, d: bytearray) -> int:
+  # Mazda 2019 (GEN2) / 2023 (GEN3) CHECKSUM. Ported 1:1 from
+  # opendbc/can/common.cc:mazda2019_checksum (source fork). The two known addresses with a
+  # non-zero seed are EPS_LKAS (0x249) and the 0x220 ACC frame; all other CHECKSUM-bearing
+  # addresses start from zero. The payload bytes 0..6 are summed; byte 7 (where CHECKSUM
+  # lives, per mazda_2019.dbc) is excluded.
+  checksum = 0
+  if address == 0x220:
+    checksum = 0x2a
+  if address == 0x249:
+    checksum = 0x53
+  for i in range(7):
+    checksum += d[i]
+  return checksum & 0xFF
+
+
 def create_steering_control(packer, CP, frame, apply_torque, lkas):
 
   tmp = apply_torque + 2048
@@ -128,3 +144,31 @@ def create_button_cmd(packer, CP, counter, button):
     }
 
     return packer.make_can_msg("CRZ_BTNS", 0, values)
+
+
+def create_steering_control_gen2(packer, apply_torque):
+  # GEN2 LKAS over EPS_LKAS (addr 0x249) on bus 1 (MAZDA_AUX). Replaces stock LKAS for
+  # GEN2 platforms (e.g., MAZDA_3_2019). Same message also serves as the TI LKAS path
+  # for GEN2 + TI hardware: panda safety treats addr 0x249 on bus 1 as MAZDA_TI_LKAS.
+  # Counter (8-bit COUNTER signal) is auto-incremented by CANPacker.
+  #
+  # CHECKSUM is auto-filled by CANPacker via mazda2019_checksum (registered in
+  # opendbc/can/dbc.py:get_checksum_state for the mazda_2019 DBC family); the algorithm is
+  # ported 1:1 from the source fork's opendbc/can/common.cc. The builder itself is ported
+  # 1:1 from selfdrive/car/mazda/mazdacan.py:create_steering_control GEN2 branch.
+  values = {
+    "LKAS_REQUEST": apply_torque,
+    "STEER_FEEL": 10000,
+  }
+  return packer.make_can_msg("EPS_LKAS", 1, values)
+
+
+def create_acc_cmd(packer, values, hold, resume):
+  # GEN2 longitudinal command over ACC (addr 0x220) on bus 2 (MAZDA_CAM). Forwarded from
+  # the stock ACC values dict that carstate copied off the camera bus, with HOLD and RESUME
+  # overridden when ACC_ENABLED is set. Ported 1:1 from selfdrive/car/mazda/mazdacan.py:
+  # create_acc_cmd; the source took an unused `self` arg which is dropped here.
+  if values["ACC_ENABLED"]:
+    values["HOLD"] = hold
+    values["RESUME"] = resume
+  return packer.make_can_msg("ACC", 2, values)
