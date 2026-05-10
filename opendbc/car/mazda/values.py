@@ -89,6 +89,9 @@ class MazdaFlags(IntFlag):
   GEN2 = 2
   # Torque interceptor add-on hardware (third-party); requires apply_ti_steer_torque_limits and TI state machine
   TORQUE_INTERCEPTOR = 8
+  # GEN2 openpilot longitudinal control. Set when alpha_long is opted in; gates panda safety
+  # ACCEL_CMD validation on MAZDA_2019_ACC TX. Off-by-default to preserve stock-ACC passthrough.
+  LONG = 16
 
 
 @dataclass

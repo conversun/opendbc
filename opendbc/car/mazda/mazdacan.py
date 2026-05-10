@@ -163,11 +163,34 @@ def create_steering_control_gen2(packer, apply_torque):
   return packer.make_can_msg("EPS_LKAS", 1, values)
 
 
-def create_acc_cmd(packer, values, hold, resume):
+# GEN2 longitudinal limits in raw ACCEL_CMD units (= accel*200 + 2000 per FrogPilot encoding).
+# +2.0 m/s^2 -> 2400, 0 m/s^2 -> 2000, -3.5 m/s^2 -> 1300. INACTIVE = 2000 (= 0 m/s^2 commanded);
+# do NOT use 0 here -- on Mazda's 12-bit encoding 0 raw maps to ~ -10 m/s^2 emergency brake.
+# Mirrors panda safety MAZDA_2019_LONG_LIMITS.
+GEN2_ACCEL_MAX = 2400
+GEN2_ACCEL_MIN = 1300
+GEN2_ACCEL_INACTIVE = 2000
+
+
+def create_acc_cmd(packer, values, hold, resume, accel=0.0, op_long=False, long_active=False):
   # GEN2 longitudinal command over ACC (addr 0x220) on bus 2 (MAZDA_CAM). Forwarded from
   # the stock ACC values dict that carstate copied off the camera bus, with HOLD and RESUME
-  # overridden when ACC_ENABLED is set. Ported 1:1 from selfdrive/car/mazda/mazdacan.py:
+  # overridden when ACC_ENABLED is set. Ported from selfdrive/car/mazda/mazdacan.py:
   # create_acc_cmd; the source took an unused `self` arg which is dropped here.
+  #
+  # Three modes:
+  #   op_long=False                  -> legacy stock-ACC pass-through; ACCEL_CMD untouched.
+  #   op_long=True,  long_active=True -> openpilot drives; write clipped accel*200+2000.
+  #   op_long=True,  long_active=False -> openpilot owns ACC but is momentarily disengaged;
+  #                                       write GEN2_ACCEL_INACTIVE so panda's inactive_accel
+  #                                       branch passes (avoids stock-cam ACCEL_CMD slipping
+  #                                       through and getting blocked by panda safety).
+  if op_long:
+    if long_active:
+      raw = int(round(accel * 200.0)) + 2000
+      values["ACCEL_CMD"] = max(GEN2_ACCEL_MIN, min(raw, GEN2_ACCEL_MAX))
+    else:
+      values["ACCEL_CMD"] = GEN2_ACCEL_INACTIVE
   if values["ACC_ENABLED"]:
     values["HOLD"] = hold
     values["RESUME"] = resume

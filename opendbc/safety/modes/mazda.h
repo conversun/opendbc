@@ -29,9 +29,14 @@
 // param flag masks
 #define FLAG_MAZDA_GEN2 2U
 #define FLAG_MAZDA_TORQUE_INTERCEPTOR 8U
+// GEN2 openpilot longitudinal: when set, the TX hook validates ACCEL_CMD on MAZDA_2019_ACC
+// against MAZDA_2019_LONG_LIMITS via longitudinal_accel_checks. When unset, ACCEL_CMD is
+// passed through unchecked because it carries the stock cam ACC value (legacy mode).
+#define FLAG_MAZDA_LONG 16U
 
 static bool mazda_gen2 = false;
 static bool mazda_torque_interceptor = false;
+static bool mazda_longitudinal = false;
 
 // track msgs coming from OP so that we know what CAM msgs to drop and what to forward
 static void mazda_rx_hook(const CANPacket_t *msg) {
@@ -130,6 +135,16 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
     .type = TorqueDriverLimited,
   };
 
+  // GEN2 longitudinal limits in raw ACCEL_CMD units (carcontroller emits accel*200+2000).
+  // +2.0 m/s^2 -> 2400, 0 m/s^2 -> 2000, -3.5 m/s^2 -> 1300. inactive_accel = 2000 matches the
+  // sentinel the carcontroller writes when op_long=True but long_active=False, so the not-engaged
+  // path passes longitudinal_accel_checks. (0 raw would be ~ -10 m/s^2 phantom braking.)
+  const LongitudinalLimits MAZDA_2019_LONG_LIMITS = {
+    .max_accel = 2400,
+    .min_accel = 1300,
+    .inactive_accel = 2000,
+  };
+
   bool tx = true;
   // Check if msg is sent on the main BUS
   if (!mazda_gen2 && (msg->bus == (unsigned char)MAZDA_MAIN)) {
@@ -156,6 +171,23 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
   if (mazda_gen2 && (msg->bus == (unsigned char)MAZDA_AUX) && (msg->addr == MAZDA_TI_LKAS)) {
     int desired_torque = (int16_t)((msg->data[0] << 8) | msg->data[1]);
     if (steer_torque_cmd_checks(desired_torque, -1, MAZDA_2019_STEERING_LIMITS)) {
+      tx = false;
+    }
+  }
+
+  // GEN2 longitudinal: ACCEL_CMD is a 12-bit Motorola-forward signal at DBC bit 16 length 12
+  // (mazda_2019.dbc: 'SG_ ACCEL_CMD : 16|12@0+'). Empirically (verified against CANPacker output)
+  // the bit layout in the wire bytes is:
+  //   value bit 11 (MSB) = msg->data[2] bit 0
+  //   value bits 10..3   = msg->data[3] bits 7..0
+  //   value bits 2..0    = msg->data[4] bits 7..5
+  // Only enforced when FLAG_MAZDA_LONG is set; otherwise ACCEL_CMD is the cam-pass-through value
+  // and validating it would break stock-ACC operation (e.g. stock AEB requesting hard braking).
+  if (mazda_longitudinal && (msg->bus == (unsigned char)MAZDA_CAM) && (msg->addr == MAZDA_2019_ACC)) {
+    int accel_cmd = (int)((((uint16_t)(msg->data[2] & 0x01U)) << 11) |
+                          (((uint16_t)msg->data[3]) << 3) |
+                          (((uint16_t)(msg->data[4] >> 5)) & 0x07U));
+    if (longitudinal_accel_checks(accel_cmd, MAZDA_2019_LONG_LIMITS)) {
       tx = false;
     }
   }
@@ -211,6 +243,7 @@ static safety_config mazda_init(uint16_t param) {
 
   mazda_gen2 = GET_FLAG(param, FLAG_MAZDA_GEN2);
   mazda_torque_interceptor = GET_FLAG(param, FLAG_MAZDA_TORQUE_INTERCEPTOR);
+  mazda_longitudinal = GET_FLAG(param, FLAG_MAZDA_LONG);
 
   safety_config ret;
   if (mazda_gen2) {

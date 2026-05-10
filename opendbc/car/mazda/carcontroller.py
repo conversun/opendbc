@@ -107,7 +107,13 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
             hold = True
 
         resume = self.frame < self.resume_until_frame
-        can_sends.append(mazdacan.create_acc_cmd(self.packer, CS.acc_values, hold, resume))
+        # When openpilot owns longitudinal (alpha_long opted in), force ACCEL_CMD to either the
+        # commanded accel (longActive=True) or the inactive sentinel (longActive=False). When OPL
+        # is off, op_long=False keeps the legacy stock-ACC pass-through behavior.
+        can_sends.append(mazdacan.create_acc_cmd(self.packer, CS.acc_values, hold, resume,
+                                                 accel=CC.actuators.accel,
+                                                 op_long=self.CP.openpilotLongitudinalControl,
+                                                 long_active=CC.longActive))
 
     else:
       # *** GEN1 path *** ---------------------------------------------------------------

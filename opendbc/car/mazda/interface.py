@@ -83,10 +83,13 @@ class CarInterface(CarInterfaceBase):
       ret.stopAccel = -0.5
       ret.vEgoStarting = 0.2
       ret.longitudinalActuatorDelay = 0.35  # gas is 0.25s, brake looks like 0.5
-      ret.longitudinalTuning.kpBP = [0., 5., 35.]
-      ret.longitudinalTuning.kpV = [0.0, 0.0, 0.0]
-      ret.longitudinalTuning.kiBP = [0., 35.]
-      ret.longitudinalTuning.kiV = [0.1, 0.1]
+      # PI tuning ported from FrogPilot's reference (selfdrive/car/mazda/interface.py:71-75) which
+      # was tuned on a real Mazda 3 2019 GEN2. Conservative starting point; expect retune after
+      # road tests reveal actual tracking error.
+      ret.longitudinalTuning.kpBP = [0., 5., 30.]
+      ret.longitudinalTuning.kpV = [1.3, 1.0, 0.7]
+      ret.longitudinalTuning.kiBP = [0., 5., 20., 30.]
+      ret.longitudinalTuning.kiV = [0.36, 0.23, 0.17, 0.1]
 
     # Torque interceptor add-on hardware bypasses the EPS minSteerSpeed lockout by injecting steering
     # torque directly. Detected via the static MazdaFlags.TORQUE_INTERCEPTOR flag set declaratively in
@@ -99,15 +102,15 @@ class CarInterface(CarInterfaceBase):
     if candidate not in (CAR.MAZDA_CX5_2022,) and not (ret.flags & (MazdaFlags.GEN2 | MazdaFlags.TORQUE_INTERCEPTOR)):
       ret.minSteerSpeed = LKAS_LIMITS.DISABLE_SPEED * CV.KPH_TO_MS
 
-    # TODO(mazda3-2019): alpha longitudinal is disabled until carcontroller writes
-    # ACCEL_CMD from CC.actuators.accel. Today we only echo the stock ACC frame and
-    # override HOLD/RESUME, which is insufficient for openpilot to actually drive
-    # gas/brake. Re-enable after porting the source fork's accel translation
-    #   raw_acc_output = (CC.actuators.accel * 200) + 2000
-    # into mazdacan.create_acc_cmd, gated on CC.longActive. Until then GEN2 uses
-    # stock MRCC for longitudinal and openpilot owns lateral only.
-    ret.alphaLongitudinalAvailable = False
-    ret.openpilotLongitudinalControl = False
+    # GEN2 alpha longitudinal: openpilot owns ACC. Carcontroller writes ACCEL_CMD = accel*200+2000
+    # into the MAZDA_2019_ACC frame on bus 2 (replacing the stock cam frame); panda safety enforces
+    # MAZDA_2019_LONG_LIMITS via longitudinal_accel_checks. Off-by-default behind alpha_long; when
+    # off the carcontroller passes through the stock cam ACCEL_CMD unchanged.
+    if ret.flags & MazdaFlags.GEN2:
+      ret.alphaLongitudinalAvailable = True
+      if alpha_long:
+        ret.openpilotLongitudinalControl = True
+        ret.safetyConfigs[0].safetyParam |= int(MazdaFlags.LONG)
 
     ret.centerToFront = ret.wheelbase * 0.41
 
