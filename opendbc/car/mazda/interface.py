@@ -83,13 +83,14 @@ class CarInterface(CarInterfaceBase):
       ret.stopAccel = -0.5
       ret.vEgoStarting = 0.2
       ret.longitudinalActuatorDelay = 0.35  # gas is 0.25s, brake looks like 0.5
-      # PI tuning ported from FrogPilot's reference (selfdrive/car/mazda/interface.py:71-75) which
-      # was tuned on a real Mazda 3 2019 GEN2. Conservative starting point; expect retune after
-      # road tests reveal actual tracking error.
-      ret.longitudinalTuning.kpBP = [0., 5., 30.]
-      ret.longitudinalTuning.kpV = [1.3, 1.0, 0.7]
-      ret.longitudinalTuning.kiBP = [0., 5., 20., 30.]
-      ret.longitudinalTuning.kiV = [0.36, 0.23, 0.17, 0.1]
+      # PI tuning matched to FrogPilot's GEN2 reference (selfdrive/car/mazda/interface.py:106-117 on
+      # branch cn-mazda). GEN2's stock ACC ECU runs its own internal closed-loop on the desired
+      # accel, so OP's outer PI uses kp=0 (pure integral) with low ki to avoid two PIDs fighting
+      # and producing high-frequency oscillation. Empirically tuned on Mazda 3 2019 GEN2.
+      ret.longitudinalTuning.kpBP = [0., 5., 35.]
+      ret.longitudinalTuning.kpV = [0.0, 0.0, 0.0]
+      ret.longitudinalTuning.kiBP = [0., 35.]
+      ret.longitudinalTuning.kiV = [0.1, 0.1]
 
     # Torque interceptor add-on hardware bypasses the EPS minSteerSpeed lockout by injecting steering
     # torque directly. Detected via the static MazdaFlags.TORQUE_INTERCEPTOR flag set declaratively in
