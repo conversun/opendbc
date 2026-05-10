@@ -199,8 +199,7 @@ class CarState(CarStateBase):
     # brake comes back as a binary signal on BRAKE_PEDAL (no analog pressure
     # available without the higher-rate BRAKE_PEDAL_SLOW message, which we skip
     # here to match the source fork).
-    ret.gas = cp_cam.vl["ENGINE_DATA"]["PEDAL_GAS"]
-    ret.gasPressed = ret.gas > 0
+    ret.gasPressed = cp_cam.vl["ENGINE_DATA"]["PEDAL_GAS"] > 0
     ret.brakePressed = cp.vl["BRAKE_PEDAL"]["BRAKE_PRESSED"] == 1
     ret.brake = 0.
 
