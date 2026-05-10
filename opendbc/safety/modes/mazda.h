@@ -70,7 +70,11 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
       }
 
       if (msg->addr == MAZDA_2019_CRUISE) {
-        acc_main_on = true;
+        // CRZ_STATE is a 3-bit Motorola signal at byte 0 bits 6:4: 0=DISABLED, 1=READY (main on),
+        // 2=ENABLED (cruise engaged), 4=GAS_OVERRIDE. Track acc_main_on off CRZ_STATE != 0 so it
+        // produces real rising/falling edges when the driver toggles ACC main; otherwise MADS would
+        // see a spurious rising edge on the very first CRUISE frame at boot, then never another.
+        acc_main_on = (msg->data[0] & 0x70U) != 0U;
         bool cruise_engaged = (msg->data[0] & 0x20U) != 0U;
         bool pre_enable = (msg->data[0] & 0x40U) != 0U;
         pcm_cruise_check(cruise_engaged || pre_enable);
