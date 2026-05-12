@@ -97,6 +97,9 @@ class CarInterface(CarInterfaceBase):
     # MazdaPlatformConfig; never via runtime params.
     if ret.flags & MazdaFlags.TORQUE_INTERCEPTOR:
       ret.safetyConfigs[0].safetyParam |= int(MazdaFlags.TORQUE_INTERCEPTOR)
+      # GEN1+TI: fully supported lateral control, not dashcamOnly
+      if not (ret.flags & MazdaFlags.GEN2):
+        ret.dashcamOnly = False
 
     # Pre-GEN2 EPS locks out steering below LKAS_LIMITS.DISABLE_SPEED unless a torque interceptor is
     # installed. CX5_2022 has the lockout disabled at the firmware level.
