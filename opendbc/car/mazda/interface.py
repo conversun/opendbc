@@ -67,7 +67,7 @@ class CarInterface(CarInterfaceBase):
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.mazda)]
     ret.radarUnavailable = True
 
-    ret.dashcamOnly = candidate not in (CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021, CAR.MAZDA_3_2019, CAR.MAZDA_CX_30, CAR.MAZDA_CX_50)
+    ret.dashcamOnly = candidate not in (CAR.MAZDA_CX5_2022, CAR.MAZDA_CX9_2021, CAR.MAZDA_3_2019, CAR.MAZDA_CX_30, CAR.MAZDA_CX_50, CAR.MAZDA_3_2023, CAR.MAZDA_CX_30_2023)
 
     ret.steerActuatorDelay = 0.1
     ret.steerLimitTimer = 0.8
@@ -93,6 +93,13 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kpV = [0.0, 0.0, 0.0]
       ret.longitudinalTuning.kiBP = [0., 35.]
       ret.longitudinalTuning.kiV = [0.1, 0.1]
+
+    # GEN3 (e.g., MAZDA_3_2023): different CAN addresses, long disabled, no alpha_long support
+    if ret.flags & MazdaFlags.GEN3:
+      ret.safetyConfigs[0].safetyParam |= int(MazdaFlags.GEN3)  # = 4
+      ret.openpilotLongitudinalControl = False
+      ret.alphaLongitudinalAvailable = False
+      ret.steerActuatorDelay = 0.335
 
     # Torque interceptor add-on hardware bypasses the EPS minSteerSpeed lockout by injecting steering
     # torque directly. Detected via the static MazdaFlags.TORQUE_INTERCEPTOR flag set declaratively in
