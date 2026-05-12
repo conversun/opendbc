@@ -789,3 +789,18 @@ VAL_ 540 RADAR_HAS_LEAD 0 "NO LEAD" 1 "HAS LEAD" ;
 VAL_ 540 RADAR_LEAD_RELATIVE_DISTANCE 0 "NO LEAD" 1 "FARTHEST" 2 "4" 3 "3" 4 "2" 5 "NEAREST" ;
 VAL_ 1143 LEFT_BS_STATUS 0 "No object detected" 1 "Object detected in left blindspot" 2 "Object detected in left blindspot with blinker - warning"
 VAL_ 1143 RIGHT_BS_STATUS 0 "No object detected" 1 "Object detected in right blindspot" 2 "Object detected in right blindspot with blinker - warning"
+
+BO_ 585 CAM_LKAS2: 8 XXX
+ SG_ LKAS_REQUEST : 3|12@0+ (1,-2048) [0|2048] "" XXX
+ SG_ CHKSUM : 19|12@0+ (1,-2048) [0|2048] "" XXX
+ SG_ KEY : 39|32@0+ (1,0) [3294744159|3294744161] "" XXX
+
+BO_ 586 TI_FEEDBACK: 8 XXX
+ SG_ TI_TORQUE_SENSOR : 7|8@0+ (1,-127) [-85|85] "" XXX
+ SG_ CHKSUM : 15|8@0+ (1,-127) [-127|128] "" XXX
+ SG_ VERSION_NUMBER : 23|8@0+ (1,0) [0|255] "" XXX
+ SG_ STATE : 31|8@0+ (1,0) [0|3] "" XXX
+ SG_ VIOL : 39|8@0+ (1,0) [0|255] "" XXX
+ SG_ ERROR : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ RAMP_DOWN : 55|8@0+ (1,0) [0|1] "" XXX
+ SG_ SPARE : 63|8@0+ (1,0) [0|255] "" XXX
