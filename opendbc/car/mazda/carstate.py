@@ -35,6 +35,8 @@ class CarState(CarStateBase):
     # safe: TI inactive, no ACC frame seen yet — only RESUME/HOLD/ACC_ENABLED
     # are stubbed because those are the keys T11 dereferences during gating.
     self.ti_state = TI_STATE.OFF
+    self.ti_lkas_allowed = False
+    self.ti_fault_permanent = False
     self.acc_values: dict = {"RESUME": 0, "HOLD": 0, "ACC_ENABLED": 0}
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
@@ -75,6 +77,20 @@ class CarState(CarStateBase):
 
     ret.steeringTorqueEps = cp.vl["STEER_TORQUE"]["STEER_TORQUE_MOTOR"]
     ret.steeringRateDeg = cp.vl["STEER_RATE"]["STEER_ANGLE_RATE"]
+
+    # GEN1+TI: read TI_FEEDBACK from body bus (0x24A) and override steer torque source.
+    # The TI device reports actual driver torque via TI_TORQUE_SENSOR; panda safety
+    # also reads this signal for torque-based blocking (see mazda.h GEN1+TI rx_hook).
+    if self.CP.flags & MazdaFlags.TORQUE_INTERCEPTOR:
+      cp_aux = can_parsers[Bus.body]
+      ti_feedback = cp_aux.vl["TI_FEEDBACK"]
+      self.ti_state = int(ti_feedback["STATE"])
+      ti_ramp_down = int(ti_feedback["RAMP_DOWN"])
+      ti_error = int(ti_feedback["ERROR"])
+      self.ti_lkas_allowed = (self.ti_state == TI_STATE.RUN and not ti_ramp_down)
+      self.ti_fault_permanent = (ti_error != 0)
+      ret.steeringTorque = int(ti_feedback["TI_TORQUE_SENSOR"])
+      ret.steeringPressed = abs(ret.steeringTorque) > LKAS_LIMITS.TI_STEER_THRESHOLD
 
     # TODO: this should be from 0 - 1.
     ret.brakePressed = cp.vl["PEDALS"]["BRAKE_ON"] == 1
@@ -249,6 +265,17 @@ class CarState(CarStateBase):
       return {
         Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
         Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, 2),
+        Bus.body: CANParser(DBC[CP.carFingerprint][Bus.pt], body_messages, 1),
+      }
+
+    # GEN1+TI: need body bus parser for TI_FEEDBACK (0x24A on bus 1).
+    if CP.flags & MazdaFlags.TORQUE_INTERCEPTOR:
+      body_messages = [
+        ("TI_FEEDBACK", 50),
+      ]
+      return {
+        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 0),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 2),
         Bus.body: CANParser(DBC[CP.carFingerprint][Bus.pt], body_messages, 1),
       }
 
