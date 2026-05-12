@@ -124,6 +124,17 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last,
                                                         CS.out.steeringTorque, CarControllerParams)
 
+        # GEN1+TI: compute TI-specific torque using TI envelope (TI_STEER_MAX=600)
+        if self.CP.flags & MazdaFlags.TORQUE_INTERCEPTOR:
+          ti_new_torque = int(round(CC.actuators.torque * self.params.TI_STEER_MAX))
+          ti_apply_torque = apply_ti_steer_torque_limits(ti_new_torque, self.ti_apply_torque_last,
+                                                         CS.out.steeringTorque, self.params)
+
+      # TI fault gate for GEN1+TI: when the TI state machine is not ready,
+      # zero both EPS and TI torques to avoid fighting a faulted interceptor.
+      if self.CP.flags & MazdaFlags.TORQUE_INTERCEPTOR and not CS.ti_lkas_allowed:
+        apply_torque = 0
+        ti_apply_torque = 0
       if CC.cruiseControl.cancel:
         # If brake is pressed, let us wait >70ms before trying to disable crz to avoid
         # a race condition with the stock system, where the second cancel from openpilot
@@ -150,7 +161,7 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         can_sends.append(mazdacan.create_alert_command(self.packer, CS.cam_laneinfo, ldw, steer_required))
 
       # send GEN1 LKAS steering command
-      can_sends.append(mazdacan.create_steering_control(self.packer, self.CP,
+      can_sends.extend(mazdacan.create_steering_control(self.packer, self.CP,
                                                         self.frame, apply_torque, CS.cam_lkas))
 
       # Intelligent Cruise Button Management — GEN1 only.
