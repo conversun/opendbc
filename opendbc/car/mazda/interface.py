@@ -16,6 +16,8 @@ from opendbc.car.mazda.values import CAR, LKAS_LIMITS, MazdaFlags
 # Values ported verbatim from upstream source fork: selfdrive/car/mazda/interface.py:17-22.
 NON_LINEAR_TORQUE_PARAMS = {
   CAR.MAZDA_3_2019: (4.6, 0.6, 0.134, 0.3605),
+  CAR.MAZDA_CX_30: (4.68689, 0.79999, 0.18244, 0.38763),
+  CAR.MAZDA_CX_50: (4.68689, 0.79999, 0.18244, 0.38763),
 }
 
 
