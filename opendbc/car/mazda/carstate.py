@@ -2,10 +2,24 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, DT_CTRL, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.mazda.values import CarControllerParams, DBC, LKAS_LIMITS, MazdaFlags, TI_STATE
+from opendbc.car.mazda.values import CarControllerParams, DBC, LKAS_LIMITS, MazdaFlags, MazdaGenSignalConfig, TI_STATE
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
+# Per-generation RX signal routing.  GEN2 and GEN3 share the same _update_gen2
+# code path but differ in which CAN bus carries CRUZE_STATE.  The address fields
+# are documentary — CANParser resolves messages by name from the DBC file.
+_GEN2_SIGNAL_CFG = MazdaGenSignalConfig(
+  cruise_state_bus=0,    # CRUZE_STATE on MAZDA_MAIN
+  brake_addr=0x43F,      # BRAKE_PEDAL_SLOW GEN2 reference
+  acc_state_addr=0x220,  # ACC GEN2 reference
+)
+
+_GEN3_SIGNAL_CFG = MazdaGenSignalConfig(
+  cruise_state_bus=1,    # CRUZE_STATE on MAZDA_AUX bus 1
+  brake_addr=0x9F,       # BRAKE_PEDAL GEN3 address
+  acc_state_addr=0x21E,  # ACC GEN3 address (NOT 0x220)
+)
 
 class CarState(CarStateBase):
   def __init__(self, CP, CP_SP):
@@ -41,7 +55,9 @@ class CarState(CarStateBase):
 
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     if self.CP.flags & MazdaFlags.GEN2:
-      return self._update_gen2(can_parsers)
+      return self._update_gen2(can_parsers, _GEN2_SIGNAL_CFG)
+    if self.CP.flags & MazdaFlags.GEN3:
+      return self._update_gen2(can_parsers, _GEN3_SIGNAL_CFG)
     return self._update_gen1(can_parsers)
 
   def _update_gen1(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
@@ -164,7 +180,7 @@ class CarState(CarStateBase):
 
     return ret, ret_sp
 
-  def _update_gen2(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
+  def _update_gen2(self, can_parsers, signal_cfg: MazdaGenSignalConfig = _GEN2_SIGNAL_CFG) -> tuple[structs.CarState, structs.CarStateSP]:
     # MAZDA_3_2019 (GEN2 + Torque Interceptor) update path. Ported from the
     # source fork's selfdrive/car/mazda/carstate.py:update_gen2 with all
     # third-party-fork toggle infrastructure stripped (no extra return tuple,
@@ -173,6 +189,8 @@ class CarState(CarStateBase):
     cp_cam = can_parsers[Bus.cam]
     # Local handle for the body bus (TI feedback). Not a method parameter.
     cp_aux = can_parsers[Bus.body]
+    # CRUZE_STATE bus differs between GEN2 (bus 0) and GEN3 (bus 1).
+    cp_cruise = can_parsers[signal_cfg.cruise_state_bus]
 
     ret = structs.CarState()
     ret_sp = structs.CarStateSP()
@@ -220,9 +238,9 @@ class CarState(CarStateBase):
     ret.brake = 0.
 
     # Cruise. CRZ_STATE encodes: 0=off, >=1=available, >=2=engaged.
-    ret.cruiseState.speed = cp.vl["CRUZE_STATE"]["CRZ_SPEED"] * unit_conversion
-    ret.cruiseState.enabled = cp.vl["CRUZE_STATE"]["CRZ_STATE"] >= 2
-    ret.cruiseState.available = cp.vl["CRUZE_STATE"]["CRZ_STATE"] != 0
+    ret.cruiseState.speed = cp_cruise.vl["CRUZE_STATE"]["CRZ_SPEED"] * unit_conversion
+    ret.cruiseState.enabled = cp_cruise.vl["CRUZE_STATE"]["CRZ_STATE"] >= 2
+    ret.cruiseState.available = cp_cruise.vl["CRUZE_STATE"]["CRZ_STATE"] != 0
     # Suppress standstill when openpilot is the longitudinal owner so the car
     # doesn't latch into a creep-stop loop fighting our own accel command.
     ret.cruiseState.standstill = ret.standstill if not self.CP.openpilotLongitudinalControl else False
@@ -244,6 +262,30 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP, CP_SP):
+    if CP.flags & MazdaFlags.GEN3:
+      pt_messages = [
+        ("STEER", 50),
+        ("BRAKE_PEDAL", 5),
+        ("BLINK_INFO", 10),
+        ("SYSTEM_SETTINGS", 10),
+        ("ACC", 50),
+      ]
+      cam_messages = [
+        ("ENGINE_DATA", 100),
+        ("WHEEL_SPEEDS", 100),
+        ("SPEED", 50),
+        ("GEAR", 40),
+      ]
+      body_messages = [
+        ("EPS_FEEDBACK", 50),
+        ("CRUZE_STATE", 10),   # GEN3: CRUZE_STATE on bus 1 (0x44A)
+      ]
+      return {
+        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, 2),
+        Bus.body: CANParser(DBC[CP.carFingerprint][Bus.pt], body_messages, 1),
+      }
+
     if CP.flags & MazdaFlags.GEN2:
       pt_messages = [
         ("STEER", 50),
