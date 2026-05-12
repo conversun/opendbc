@@ -22,6 +22,9 @@
 #define MAZDA_TI_LKAS             0x249U
 #define MAZDA_TI_FEEDBACK   0x24AU
 
+// GEN3-specific addresses
+#define MAZDA_GEN3_BRAKE  0x9FU
+
 // CAN bus numbers
 #define MAZDA_MAIN 0
 #define MAZDA_AUX  1
@@ -124,6 +127,38 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
       }
     }
   }
+
+  if (mazda_gen3) {
+    if ((int)msg->bus == MAZDA_MAIN) {
+      if (msg->addr == MAZDA_GEN3_BRAKE) {
+        brake_pressed = (msg->data[5] & 0x4U) != 0U;
+      }
+    }
+
+    if ((int)msg->bus == MAZDA_AUX) {
+      if (msg->addr == MAZDA_2019_CRUISE) {
+        acc_main_on = (msg->data[0] & 0x70U) != 0U;
+        bool cruise_engaged = (msg->data[0] & 0x20U) != 0U;
+        bool pre_enable = (msg->data[0] & 0x40U) != 0U;
+        pcm_cruise_check(cruise_engaged || pre_enable);
+      }
+      if (msg->addr == MAZDA_2019_STEER_TORQUE) {
+        int torque_driver_new = (int16_t)((msg->data[0] << 8) | msg->data[1]);
+        update_sample(&torque_driver, torque_driver_new);
+      }
+    }
+
+    if ((int)msg->bus == MAZDA_CAM) {
+      if (msg->addr == MAZDA_2019_GAS) {
+        gas_pressed = (msg->data[4] != 0U) || ((msg->data[5] & 0xC0U) != 0U);
+      }
+      if (msg->addr == MAZDA_2019_WHEEL_SPEEDS) {
+        int speed = ((msg->data[0] << 8) | msg->data[1]) - 10000;
+        vehicle_moving = speed > 10;
+        UPDATE_VEHICLE_SPEED(speed * 0.01 * KPH_TO_MS);
+      }
+    }
+  }
 }
 
 static bool mazda_tx_hook(const CANPacket_t *msg) {
@@ -188,7 +223,7 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  if (mazda_gen2 && (msg->bus == (unsigned char)MAZDA_AUX) && (msg->addr == MAZDA_TI_LKAS)) {
+  if ((mazda_gen2 || mazda_gen3) && (msg->bus == (unsigned char)MAZDA_AUX) && (msg->addr == MAZDA_TI_LKAS)) {
     int desired_torque = (int16_t)((msg->data[0] << 8) | msg->data[1]);
     if (steer_torque_cmd_checks(desired_torque, -1, MAZDA_2019_STEERING_LIMITS)) {
       tx = false;
@@ -218,7 +253,7 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
 static bool mazda_fwd_hook(int bus_num, int addr) {
   bool block = false;
 
-  if (mazda_gen2) {
+  if (mazda_gen2 || mazda_gen3) {
     block = addr == MAZDA_TI_LKAS;
     if (bus_num == MAZDA_MAIN) {
       block = block || (addr == MAZDA_2019_ACC);
@@ -276,14 +311,26 @@ static safety_config mazda_init(uint16_t param) {
     {.msg = {{MAZDA_2019_CRZ_BTNS,     0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
 
+  static RxCheck mazda_2023_rx_checks[] = {
+    {.msg = {{MAZDA_GEN3_BRAKE,        0, 8, 5U,   .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_GAS,          2, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_CRUISE,       1, 8, 10U,  .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_WHEEL_SPEEDS, 2, 8, 30U,  .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_STEER_TORQUE, 1, 8, 50U,  .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_CRZ_BTNS,     0, 8, 10U,  .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+  };
+
   mazda_gen2 = GET_FLAG(param, FLAG_MAZDA_GEN2);
   mazda_torque_interceptor = GET_FLAG(param, FLAG_MAZDA_TORQUE_INTERCEPTOR);
   mazda_longitudinal = GET_FLAG(param, FLAG_MAZDA_LONG);
+  mazda_gen3 = GET_FLAG(param, FLAG_MAZDA_GEN3);
 
   safety_config ret;
   if (mazda_gen2) {
     ret = mazda_torque_interceptor ? BUILD_SAFETY_CFG(mazda_2019_ti_rx_checks, MAZDA_2019_TX_MSGS) : \
                                     BUILD_SAFETY_CFG(mazda_2019_rx_checks, MAZDA_2019_TX_MSGS);
+  } else if (mazda_gen3) {
+    ret = BUILD_SAFETY_CFG(mazda_2023_rx_checks, MAZDA_2019_TX_MSGS);
   } else if (mazda_torque_interceptor) {
     ret = BUILD_SAFETY_CFG(mazda_ti_rx_checks, MAZDA_GEN1_TI_TX_MSGS);
   } else {
