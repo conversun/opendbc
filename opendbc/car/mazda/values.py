@@ -89,10 +89,24 @@ class MazdaFlags(IntFlag):
   GEN2 = 2
   # Torque interceptor add-on hardware (third-party); requires apply_ti_steer_torque_limits and TI state machine
   TORQUE_INTERCEPTOR = 8
+  # Gen 3 hardware (e.g., MAZDA_3_2023): different addresses for BRAKE/CRUISE/SPEED; long disabled
+  GEN3 = 4
   # GEN2 openpilot longitudinal control. Set when alpha_long is opted in; gates panda safety
   # ACCEL_CMD validation on MAZDA_2019_ACC TX. Off-by-default to preserve stock-ACC passthrough.
   LONG = 16
 
+
+@dataclass(frozen=True)
+class MazdaGenSignalConfig:
+  """Per-generation RX signal routing for carstate._update_gen2.
+
+  cruise_state_bus: CAN bus for CRUZE_STATE (GEN2=0, GEN3=1)
+  brake_addr: address for BRAKE_PEDAL (GEN2=0x43F, GEN3=0x9F)
+  acc_state_addr: address for ACC speed (GEN2=0x220, GEN3=0x21E)
+  """
+  cruise_state_bus: int
+  brake_addr: int
+  acc_state_addr: int
 
 @dataclass
 class MazdaPlatformConfig(PlatformConfig):
@@ -103,6 +117,8 @@ class MazdaPlatformConfig(PlatformConfig):
     if self.flags & MazdaFlags.GEN2:
       self.dbc_dict = {Bus.pt: 'mazda_2019', Bus.cam: 'mazda_2019', Bus.body: 'mazda_2019'}
 
+    if self.flags & MazdaFlags.GEN3:
+      self.dbc_dict = {Bus.pt: 'mazda_2023', Bus.cam: 'mazda_2023', Bus.body: 'mazda_2023'}
 
 class CAR(Platforms):
   MAZDA_CX5 = MazdaPlatformConfig(
@@ -143,6 +159,16 @@ class CAR(Platforms):
     [MazdaCarDocs("Mazda CX-50 2022-25")],
     MazdaCarSpecs(mass=1531, wheelbase=2.814, steerRatio=15.5),
     flags=MazdaFlags.GEN2,
+  )
+  MAZDA_3_2023 = MazdaPlatformConfig(
+    [MazdaCarDocs("Mazda 3 2023+")],
+    MazdaCarSpecs(mass=1361, wheelbase=2.725, steerRatio=18.8),
+    flags=MazdaFlags.GEN3,
+  )
+  MAZDA_CX_30_2023 = MazdaPlatformConfig(
+    [MazdaCarDocs("Mazda CX-30 2023+")],
+    MazdaCarSpecs(mass=1531, wheelbase=2.814, steerRatio=15.5),
+    flags=MazdaFlags.GEN3,
   )
   MAZDA_CX5_TI = MazdaPlatformConfig(
     [MazdaCarDocs("Mazda CX-5 2017-21 (Torque Interceptor)")],
