@@ -134,6 +134,26 @@ class CAR(Platforms):
     MazdaCarSpecs(mass=3000 * CV.LB_TO_KG, wheelbase=2.725, steerRatio=18.8),
     flags=MazdaFlags.GEN2,
   )
+  MAZDA_CX5_TI = MazdaPlatformConfig(
+    [MazdaCarDocs("Mazda CX-5 2017-21 (Torque Interceptor)")],
+    MAZDA_CX5.specs,
+    flags=MazdaFlags.GEN1 | MazdaFlags.TORQUE_INTERCEPTOR,
+  )
+  MAZDA_CX9_TI = MazdaPlatformConfig(
+    [MazdaCarDocs("Mazda CX-9 2016-20 (Torque Interceptor)")],
+    MAZDA_CX9.specs,
+    flags=MazdaFlags.GEN1 | MazdaFlags.TORQUE_INTERCEPTOR,
+  )
+  MAZDA_3_TI = MazdaPlatformConfig(
+    [MazdaCarDocs("Mazda 3 2017-18 (Torque Interceptor)")],
+    MAZDA_3.specs,
+    flags=MazdaFlags.GEN1 | MazdaFlags.TORQUE_INTERCEPTOR,
+  )
+  MAZDA_6_TI = MazdaPlatformConfig(
+    [MazdaCarDocs("Mazda 6 2017-20 (Torque Interceptor)")],
+    MAZDA_6.specs,
+    flags=MazdaFlags.GEN1 | MazdaFlags.TORQUE_INTERCEPTOR,
+  )
 
 
 class LKAS_LIMITS:
