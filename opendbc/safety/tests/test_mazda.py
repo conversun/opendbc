@@ -210,5 +210,45 @@ class TestMazdaGen2TiSafety(TestMazdaGen2Safety):
       self.assertEqual(-1, self.safety.safety_fwd_hook(MAZDA_AUX, addr))
 
 
+class TestMazdaGen1TiSafety(TestMazdaSafety):
+  """GEN1 + Original Torque Interceptor (TI1) safety test.
+
+  param = FLAG_MAZDA_TORQUE_INTERCEPTOR (8), no GEN2 flag.
+  The TI device sits on bus 1 (AUX) and provides a parallel LKAS
+  channel (CAM_LKAS2 @ 0x249) plus torque feedback (TI_FEEDBACK @ 0x24A).
+  """
+
+  FLAGS = FLAG_MAZDA_TORQUE_INTERCEPTOR
+  TX_MSGS = [[0x243, 0], [0x249, 1], [0x09d, 0], [0x440, 0]]
+  DRIVER_TORQUE_BUS = MAZDA_AUX
+
+  def setUp(self):
+    self.packer = CANPackerSafety("mazda_2017")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.mazda, self.FLAGS)
+    self.safety.init_tests()
+
+  def _torque_driver_msg(self, torque):
+    # TI_FEEDBACK (0x24A) on bus 1: TI_TORQUE_SENSOR at byte 0, scale=1, offset=-127
+    raw = int(torque) + 127
+    return libsafety_py.make_CANPacket(0x24A, MAZDA_AUX, bytes([raw & 0xFF]) + b'\x00' * 7)
+
+  def test_gen1_ti_cam_lkas2_tx_allowed(self):
+    """CAM_LKAS2 (0x249) on bus 1 must be in TX whitelist for GEN1+TI."""
+    self.safety.set_controls_allowed(True)
+    self._reset_torque_driver_measurement(0)
+    self._set_prev_torque(0)
+    # After T1.3 adds GEN1_TI_TX_MSGS, this should PASS. Currently FAILS (RED).
+    result = self._tx(libsafety_py.make_CANPacket(0x249, MAZDA_AUX, b'\x00' * 8))
+    self.assertTrue(result)
+
+  def test_gen1_base_lkas_still_allowed(self):
+    """CAM_LKAS (0x243) on bus 0 must still be allowed for GEN1+TI."""
+    self.safety.set_controls_allowed(True)
+    self._reset_torque_driver_measurement(0)
+    self._set_prev_torque(0)
+    result = self._tx(self._torque_cmd_msg(0))
+    self.assertTrue(result)
+
 if __name__ == "__main__":
   unittest.main()
