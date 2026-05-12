@@ -221,6 +221,7 @@ class TestMazdaGen1TiSafety(TestMazdaSafety):
   FLAGS = FLAG_MAZDA_TORQUE_INTERCEPTOR
   TX_MSGS = [[0x243, 0], [0x249, 1], [0x09d, 0], [0x440, 0]]
   DRIVER_TORQUE_BUS = MAZDA_AUX
+  RELAY_MALFUNCTION_ADDRS = {0: (0x243, 0x440), MAZDA_AUX: (MAZDA_TI_LKAS,)}
 
   def setUp(self):
     self.packer = CANPackerSafety("mazda_2017")
@@ -239,7 +240,7 @@ class TestMazdaGen1TiSafety(TestMazdaSafety):
     self._reset_torque_driver_measurement(0)
     self._set_prev_torque(0)
     # After T1.3 adds GEN1_TI_TX_MSGS, this should PASS. Currently FAILS (RED).
-    result = self._tx(libsafety_py.make_CANPacket(0x249, MAZDA_AUX, b'\x00' * 8))
+    result = self._tx(libsafety_py.make_CANPacket(0x249, MAZDA_AUX, bytes([0x08, 0x00]) + b'\x00' * 6))
     self.assertTrue(result)
 
   def test_gen1_base_lkas_still_allowed(self):
