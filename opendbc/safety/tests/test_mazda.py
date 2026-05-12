@@ -8,6 +8,7 @@ from opendbc.safety.tests.common import CANPackerSafety
 
 FLAG_MAZDA_GEN2 = 2
 FLAG_MAZDA_TORQUE_INTERCEPTOR = 8
+FLAG_MAZDA_GEN3 = 4
 
 MAZDA_MAIN = 0
 MAZDA_AUX = 1
@@ -250,6 +251,45 @@ class TestMazdaGen1TiSafety(TestMazdaSafety):
     self._set_prev_torque(0)
     result = self._tx(self._torque_cmd_msg(0))
     self.assertTrue(result)
+
+
+class TestMazdaGen3Safety(TestMazdaGen2Safety):
+  """GEN3 Mazda 2023+ safety test (mazda_2023.dbc path).
+
+  param = FLAG_MAZDA_GEN3 (4); same TX_MSGS as GEN2 (TI_LKAS + ACC).
+  GEN3 uses different bus assignments for BRAKE (0x9F bus 0), CRUISE
+  (0x44A bus 1), and SPEED (0x215 bus 2 via WHEEL_SPEEDS).
+  alphaLong disabled (GEN3 long not yet supported).
+  """
+
+  FLAGS = FLAG_MAZDA_GEN3
+
+  def setUp(self):
+    self.packer = CANPackerSafety("mazda_2023")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.mazda, self.FLAGS)
+    self.safety.init_tests()
+
+  def _user_brake_msg(self, brake):
+    # GEN3: BRAKE_PEDAL at 0x9F bus 0 (not 0x43F)
+    dat = bytearray(8)
+    dat[5] = 0x4 if brake else 0x0
+    return libsafety_py.make_CANPacket(0x9F, MAZDA_MAIN, bytes(dat))
+
+  def _pcm_status_msg(self, enable):
+    # GEN3: CRUZE_STATE at 0x44A bus 1 (AUX), bit 5 = engaged
+    dat = bytearray(8)
+    dat[0] = 0x20 if enable else 0x0
+    return libsafety_py.make_CANPacket(0x44A, MAZDA_AUX, bytes(dat))
+
+  def _wheel_speeds_msg(self, speed: float):
+    # GEN3: WHEEL_SPEEDS at 0x215 bus 2 (CAM) — re-use GEN2 helper adapted
+    values = {s: speed for s in ["FL", "FR", "RL", "RR"]}
+    return self.packer.make_can_msg_safety("WHEEL_SPEEDS", MAZDA_CAM, values)
+
+  def _speed_msg(self, speed: float):
+    # GEN3: speed from WHEEL_SPEEDS (no separate SPEED msg)
+    return self._wheel_speeds_msg(speed)
 
 if __name__ == "__main__":
   unittest.main()
