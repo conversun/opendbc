@@ -30,6 +30,7 @@
 // param flag masks
 #define FLAG_MAZDA_GEN2 2U
 #define FLAG_MAZDA_TORQUE_INTERCEPTOR 8U
+#define FLAG_MAZDA_GEN3  4U
 // GEN2 openpilot longitudinal: when set, the TX hook validates ACCEL_CMD on MAZDA_2019_ACC
 // against MAZDA_2019_LONG_LIMITS via longitudinal_accel_checks. When unset, ACCEL_CMD is
 // passed through unchecked because it carries the stock cam ACC value (legacy mode).
@@ -38,6 +39,7 @@
 static bool mazda_gen2 = false;
 static bool mazda_torque_interceptor = false;
 static bool mazda_longitudinal = false;
+static bool mazda_gen3 = false;
 
 // track msgs coming from OP so that we know what CAM msgs to drop and what to forward
 static void mazda_rx_hook(const CANPacket_t *msg) {
