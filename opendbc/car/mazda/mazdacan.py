@@ -75,7 +75,19 @@ def create_steering_control(packer, CP, frame, apply_torque, lkas):
       "CHKSUM": csum
     }
 
-  return packer.make_can_msg("CAM_LKAS", 0, values)
+  msgs = [packer.make_can_msg("CAM_LKAS", 0, values)]
+
+  # Dual-emit CAM_LKAS2 (0x249 bus 1) for GEN1+TI hardware. The TI device
+  # intercepts EPS torque on the vehicle bus and validates the KEY magic constant.
+  if (CP.flags & MazdaFlags.TORQUE_INTERCEPTOR) and not (CP.flags & MazdaFlags.GEN2):
+    ti_values = {
+      "LKAS_REQUEST": apply_torque,
+      "KEY": 3294744160,
+      "CHKSUM": apply_torque,
+    }
+    msgs.append(packer.make_can_msg("CAM_LKAS2", 1, ti_values))
+
+  return msgs
 
 
 def create_alert_command(packer, cam_msg: dict, ldw: bool, steer_required: bool):
