@@ -76,10 +76,23 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
 
       if (msg->addr == MAZDA_2019_CRUISE) {
         // CRZ_STATE is a 3-bit Motorola signal at byte 0 bits 6:4: 0=DISABLED, 1=READY (main on),
-        // 2=ENABLED (cruise engaged), 4=GAS_OVERRIDE. Track acc_main_on off CRZ_STATE != 0 so it
-        // produces real rising/falling edges when the driver toggles ACC main; otherwise MADS would
-        // see a spurious rising edge on the very first CRUISE frame at boot, then never another.
-        acc_main_on = (msg->data[0] & 0x70U) != 0U;
+        // 2=ENABLED (cruise engaged), 4=GAS_OVERRIDE. Stock MAZDA_3_2019 MRCC ECU drops CRZ_STATE
+        // to 0 (DISABLED) below ~15 km/h even when the driver wants MRCC active. Following the raw
+        // CRZ_STATE for acc_main_on caused MADS lateral to cut on every low-speed deceleration
+        // (verified 2026-05-27 stop-and-go route: latActive=False at v=14.7 km/h with no driver
+        // input). Latch acc_main_on to true on the first non-zero CRZ_STATE (real driver MAIN ON
+        // edge); never lower it through CRZ_STATE=0 drops so MADS lateral stays alive across the
+        // ECU's low-speed cutoff. Trade-off: explicit driver MAIN OFF presses no longer produce a
+        // falling edge to mads_state_update -- driver disengages via brake or MADS/LKAS button.
+        //
+        // Boot safety (preserves f8c9f235 fix): when CRZ_STATE=0 at boot (typical -- driver hasn't
+        // pressed MAIN yet), acc_main_on stays at its safety-init value (false), so no spurious
+        // rising edge fires before pandad's heartbeat carries mads_engaged=true. Unconditional
+        // hardcode-true would re-introduce the heartbeat mismatch (controlsMismatchLateral after
+        // every ACC engagement) that f8c9f235 fixed by tracking edges.
+        if ((msg->data[0] & 0x70U) != 0U) {
+          acc_main_on = true;
+        }
         bool cruise_engaged = (msg->data[0] & 0x20U) != 0U;
         bool pre_enable = (msg->data[0] & 0x40U) != 0U;
         pcm_cruise_check(cruise_engaged || pre_enable);

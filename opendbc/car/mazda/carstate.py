@@ -37,6 +37,13 @@ class CarState(CarStateBase):
     self.ti_state = TI_STATE.OFF
     self.acc_values: dict = {"RESUME": 0, "HOLD": 0, "ACC_ENABLED": 0}
 
+    # GEN2 cruiseState.available latch. Mirrors panda safety acc_main_on latch
+    # (opendbc/safety/modes/mazda.h MAZDA_2019_CRUISE branch): stays False until first non-zero
+    # CRZ_STATE (real driver MAIN ON), then sticks True across the stock MRCC ECU's <15 km/h
+    # CRZ_STATE=0 cutoff so MADS lateral doesn't drop via the `not CS.cruiseState.available`
+    # gate in sunnypilot/mads/mads.py.
+    self._gen2_main_on_latched = False
+
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     if self.CP.flags & MazdaFlags.GEN2:
       return self._update_gen2(can_parsers)
@@ -203,10 +210,17 @@ class CarState(CarStateBase):
     ret.brakePressed = cp.vl["BRAKE_PEDAL"]["BRAKE_PRESSED"] == 1
     ret.brake = 0.
 
-    # Cruise. CRZ_STATE encodes: 0=off, >=1=available, >=2=engaged.
+    # Cruise. CRZ_STATE encodes: 0=DISABLED, 1=READY, 2=ENABLED, 4=GAS_OVERRIDE.
     ret.cruiseState.speed = cp.vl["CRUZE_STATE"]["CRZ_SPEED"] * unit_conversion
     ret.cruiseState.enabled = cp.vl["CRUZE_STATE"]["CRZ_STATE"] >= 2
-    ret.cruiseState.available = cp.vl["CRUZE_STATE"]["CRZ_STATE"] != 0
+    # Latch cruiseState.available True on first non-zero CRZ_STATE (real driver MAIN ON edge) and
+    # keep it True afterwards. Mirrors panda safety acc_main_on latch (opendbc/safety/modes/mazda.h
+    # MAZDA_2019_CRUISE branch). Stock MRCC drops CRZ_STATE to 0 below ~15 km/h; without the latch
+    # MADS lateral would cut via the `not CS.cruiseState.available` gate in sunnypilot/mads/mads.py.
+    # cruiseState.enabled still tracks the real engage bit for the longitudinal path.
+    if cp.vl["CRUZE_STATE"]["CRZ_STATE"] != 0:
+      self._gen2_main_on_latched = True
+    ret.cruiseState.available = self._gen2_main_on_latched
     # Suppress standstill when openpilot is the longitudinal owner so the car
     # doesn't latch into a creep-stop loop fighting our own accel command.
     ret.cruiseState.standstill = ret.standstill if not self.CP.openpilotLongitudinalControl else False

@@ -185,6 +185,36 @@ class TestMazdaGen2Safety(common.CarSafetyTest, common.DriverTorqueSteeringSafet
     self.assertTrue(self._tx(libsafety_py.make_CANPacket(MAZDA_2019_ACC, MAZDA_CAM, b"\x00" * 8)))
     self.assertFalse(self._tx(libsafety_py.make_CANPacket(MAZDA_2019_ACC, MAZDA_MAIN, b"\x00" * 8)))
 
+  def test_acc_main_on_latched_for_gen2(self):
+    # GEN2 latches acc_main_on to true on the first non-zero CRZ_STATE and never lowers it.
+    # Stock MRCC drops CRZ_STATE to 0 (DISABLED) below ~15 km/h. Following the raw signal would
+    # produce a falling edge in mads_state_update, dropping controls_allowed_lateral and cutting
+    # MADS lateral mid-drive. Boot safety: CRZ_STATE=0 at boot must NOT trigger a spurious
+    # rising edge before pandad's heartbeat (regresses f8c9f235).
+    # See opendbc/safety/modes/mazda.h MAZDA_2019_CRUISE branch.
+    def _crz_frame(byte0):
+      dat = bytearray(8)
+      dat[0] = byte0
+      return libsafety_py.make_CANPacket(0x44a, MAZDA_MAIN, bytes(dat))
+
+    # Boot: zero CRZ_STATE must NOT raise acc_main_on (prevents heartbeat mismatch).
+    self.assertFalse(self.safety.get_acc_main_on(), "safety_init should leave acc_main_on=False")
+    self.assertTrue(self._rx(_crz_frame(0x00)))
+    self.assertFalse(self.safety.get_acc_main_on(),
+                     "CRZ_STATE=0 at boot must not produce a spurious acc_main_on rising edge")
+
+    # Driver MAIN ON: any non-zero CRZ_STATE latches acc_main_on=true.
+    for crz_byte0 in (0x10, 0x20, 0x40, 0x60, 0x70):  # READY, ENABLED, GAS_OVERRIDE, ...
+      self.assertTrue(self._rx(_crz_frame(crz_byte0)))
+      self.assertTrue(self.safety.get_acc_main_on(),
+                      f"non-zero CRZ_STATE 0x{crz_byte0:02x} must set acc_main_on=True")
+
+    # Low-speed drop: CRZ_STATE=0 AFTER latching must KEEP acc_main_on=True (the fix).
+    for _ in range(10):  # simulate sustained CRZ_STATE=0 across multiple CRUISE frames
+      self.assertTrue(self._rx(_crz_frame(0x00)))
+      self.assertTrue(self.safety.get_acc_main_on(),
+                      "CRZ_STATE=0 after latch must NOT lower acc_main_on (low-speed-cutoff fix)")
+
 
 class TestMazdaGen2TiSafety(TestMazdaGen2Safety):
   FLAGS = FLAG_MAZDA_GEN2 | FLAG_MAZDA_TORQUE_INTERCEPTOR
