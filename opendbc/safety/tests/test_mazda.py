@@ -215,6 +215,39 @@ class TestMazdaGen2Safety(common.CarSafetyTest, common.DriverTorqueSteeringSafet
       self.assertTrue(self.safety.get_acc_main_on(),
                       "CRZ_STATE=0 after latch must NOT lower acc_main_on (low-speed-cutoff fix)")
 
+  def test_gen2_mads_lateral_survives_cruze_state_drop(self):
+    # End-to-end MADS regression test for the low-speed-cutoff failure mode.
+    # Reproduces the user-facing symptom that the acc_main_on latch fixes:
+    # MADS lateral arming on driver MAIN ON (non-zero CRZ_STATE), then a stock-MRCC
+    # CRZ_STATE=0 cutoff (simulating the ~15 km/h ECU drop) must NOT lower
+    # controls_allowed_lateral. With the pre-latch behavior, this assertion fails because
+    # mads_state_update sees a falling edge and dispatches mads_exit_controls.
+    # See opendbc/safety/sunnypilot/mads.h m_update_control_state (acc_main FALLING handler).
+    def _crz_frame(byte0):
+      dat = bytearray(8)
+      dat[0] = byte0
+      return libsafety_py.make_CANPacket(0x44a, MAZDA_MAIN, bytes(dat))
+
+    # Enable MADS. set_heartbeat_engaged_mads(True) so mads_heartbeat_engaged_check
+    # doesn't independently kick lateral out during the test (heartbeat-loss is a separate concern).
+    self.safety.set_mads_params(True, False, False)
+    self.safety.set_heartbeat_engaged_mads(True)
+    self.assertFalse(self.safety.get_controls_allowed_lateral(),
+                     "MADS lateral must start disarmed before any acc_main rising edge")
+
+    # Driver MAIN ON: non-zero CRZ_STATE produces acc_main rising edge -> MADS arms lateral.
+    self.assertTrue(self._rx(_crz_frame(0x10)))  # CRZ_STATE = READY
+    self.assertTrue(self.safety.get_controls_allowed_lateral(),
+                    "MADS lateral must arm on first non-zero CRZ_STATE rising edge")
+
+    # Stock MRCC low-speed cutoff: CRZ_STATE -> 0 must KEEP lateral armed (the fix).
+    # Pre-latch behavior: falling edge -> MADS_DISENGAGE_REASON_ACC_MAIN_OFF -> lateral cut.
+    # Post-latch behavior: no edge -> lateral stays armed across the cutoff.
+    for _ in range(5):  # sustained drop across multiple frames (mimics qlog t=58.6s pattern)
+      self.assertTrue(self._rx(_crz_frame(0x00)))
+    self.assertTrue(self.safety.get_controls_allowed_lateral(),
+                    "MADS lateral must survive stock MRCC CRZ_STATE=0 cutoff (low-speed-fix regression test)")
+
 
 class TestMazdaGen2TiSafety(TestMazdaGen2Safety):
   FLAGS = FLAG_MAZDA_GEN2 | FLAG_MAZDA_TORQUE_INTERCEPTOR
