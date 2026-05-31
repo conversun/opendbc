@@ -92,6 +92,11 @@ class MazdaFlags(IntFlag):
   # GEN2 openpilot longitudinal control. Set when alpha_long is opted in; gates panda safety
   # ACCEL_CMD validation on MAZDA_2019_ACC TX. Off-by-default to preserve stock-ACC passthrough.
   LONG = 16
+  # GEN2 low-speed longitudinal test probe (default OFF). Re-anchors longitudinal engagement
+  # authority to the OEM ACC_2.ACC_ENABLED bit (0x222) instead of CRZ_STATE==2, so openpilot can
+  # keep commanding ACCEL_CMD below the stock cruise display floor (~13-22 km/h). Controlled-test
+  # only; gated by the MazdaGen2LowSpeedLong param. Requires GEN2 + openpilotLongitudinalControl.
+  LOWSPEED_LONG = 32
 
 
 @dataclass

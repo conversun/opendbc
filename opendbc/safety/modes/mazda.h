@@ -19,6 +19,7 @@
 #define MAZDA_2019_STEER_TORQUE   0x24BU
 #define MAZDA_2019_CRZ_BTNS       0x09DU
 #define MAZDA_2019_ACC            0x220U
+#define MAZDA_2019_ACC_2          0x222U
 #define MAZDA_TI_LKAS             0x249U
 
 // CAN bus numbers
@@ -33,10 +34,17 @@
 // against MAZDA_2019_LONG_LIMITS via longitudinal_accel_checks. When unset, ACCEL_CMD is
 // passed through unchecked because it carries the stock cam ACC value (legacy mode).
 #define FLAG_MAZDA_LONG 16U
+// GEN2 low-speed longitudinal test probe (default OFF). When set, longitudinal engagement authority
+// (controls_allowed) additionally follows the OEM MAZDA_2019_ACC_2.ACC_ENABLED bit so openpilot can
+// keep commanding ACCEL_CMD below the stock cruise display floor (~13-22 km/h, where CRZ_STATE drops
+// out of ENABLED while the OEM radar keeps actuating to standstill). Controlled-test only.
+#define FLAG_MAZDA_LOWSPEED_LONG 32U
 
 static bool mazda_gen2 = false;
 static bool mazda_torque_interceptor = false;
 static bool mazda_longitudinal = false;
+static bool mazda_lowspeed_long = false;
+static bool mazda_acc2_authority = false;
 
 // track msgs coming from OP so that we know what CAM msgs to drop and what to forward
 static void mazda_rx_hook(const CANPacket_t *msg) {
@@ -82,7 +90,9 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
         acc_main_on = (msg->data[0] & 0x70U) != 0U;
         bool cruise_engaged = (msg->data[0] & 0x20U) != 0U;
         bool pre_enable = (msg->data[0] & 0x40U) != 0U;
-        pcm_cruise_check(cruise_engaged || pre_enable);
+        // Low-speed longitudinal probe: also hold engagement while the OEM ACC_2 authority bit is set,
+        // even after CRZ_STATE has dropped out of ENABLED at low speed. Gated by FLAG_MAZDA_LOWSPEED_LONG.
+        pcm_cruise_check(cruise_engaged || pre_enable || (mazda_lowspeed_long && mazda_acc2_authority));
       }
     }
 
@@ -109,6 +119,15 @@ static void mazda_rx_hook(const CANPacket_t *msg) {
         int speed = ((msg->data[0] << 8) | msg->data[1]) - 10000;
         vehicle_moving = speed > 10; // moving when speed > 0.1 kph
         UPDATE_VEHICLE_SPEED(speed * 0.01 * KPH_TO_MS);
+      }
+
+      if (msg->addr == MAZDA_2019_ACC_2) {
+        // OEM ACC actuation-authority bits (mazda_2019.dbc ACC_2): ACC_ENABLED = data[2] & 0x04,
+        // ACC_NOT_ENABLED = data[0] & 0x02. This authority persists below the CRZ_STATE display floor
+        // (verified to standstill during stop&go), so it gates the low-speed longitudinal probe.
+        bool acc2_enabled = (msg->data[2] & 0x04U) != 0U;
+        bool acc2_not_enabled = (msg->data[0] & 0x02U) != 0U;
+        mazda_acc2_authority = acc2_enabled && !acc2_not_enabled;
       }
     }
   }
@@ -230,6 +249,19 @@ static safety_config mazda_init(uint16_t param) {
     {.msg = {{MAZDA_2019_CRZ_BTNS,     0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
 
+  // Low-speed longitudinal probe: GEN2 (non-TI) RX checks plus MAZDA_2019_ACC_2 so an ACC_2 RX
+  // timeout invalidates the safety config (clearing controls_allowed) and never leaves authority stale.
+  static RxCheck mazda_2019_lowspeed_rx_checks[] = {
+    {.msg = {{MAZDA_2019_BRAKE,        0, 8, 20U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_GAS,          2, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_CRUISE,       0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_SPEED,        2, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true},
+             {MAZDA_2019_WHEEL_SPEEDS, 2, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }}},
+    {.msg = {{MAZDA_2019_STEER_TORQUE, 1, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_CRZ_BTNS,     0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+    {.msg = {{MAZDA_2019_ACC_2,        2, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
+  };
+
   static RxCheck mazda_2019_ti_rx_checks[] = {
     {.msg = {{MAZDA_2019_BRAKE,        0, 8, 20U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
     {.msg = {{MAZDA_2019_GAS,          2, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
@@ -244,11 +276,18 @@ static safety_config mazda_init(uint16_t param) {
   mazda_gen2 = GET_FLAG(param, FLAG_MAZDA_GEN2);
   mazda_torque_interceptor = GET_FLAG(param, FLAG_MAZDA_TORQUE_INTERCEPTOR);
   mazda_longitudinal = GET_FLAG(param, FLAG_MAZDA_LONG);
+  mazda_lowspeed_long = GET_FLAG(param, FLAG_MAZDA_LOWSPEED_LONG);
+  mazda_acc2_authority = false;
 
   safety_config ret;
   if (mazda_gen2) {
-    ret = mazda_torque_interceptor ? BUILD_SAFETY_CFG(mazda_2019_ti_rx_checks, MAZDA_2019_TX_MSGS) : \
-                                    BUILD_SAFETY_CFG(mazda_2019_rx_checks, MAZDA_2019_TX_MSGS);
+    if (mazda_torque_interceptor) {
+      ret = BUILD_SAFETY_CFG(mazda_2019_ti_rx_checks, MAZDA_2019_TX_MSGS);
+    } else if (mazda_lowspeed_long) {
+      ret = BUILD_SAFETY_CFG(mazda_2019_lowspeed_rx_checks, MAZDA_2019_TX_MSGS);
+    } else {
+      ret = BUILD_SAFETY_CFG(mazda_2019_rx_checks, MAZDA_2019_TX_MSGS);
+    }
   } else {
     ret = BUILD_SAFETY_CFG(mazda_rx_checks, MAZDA_TX_MSGS);
   }

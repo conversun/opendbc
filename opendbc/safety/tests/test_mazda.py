@@ -8,12 +8,15 @@ from opendbc.safety.tests.common import CANPackerSafety
 
 FLAG_MAZDA_GEN2 = 2
 FLAG_MAZDA_TORQUE_INTERCEPTOR = 8
+FLAG_MAZDA_LONG = 16
+FLAG_MAZDA_LOWSPEED_LONG = 32
 
 MAZDA_MAIN = 0
 MAZDA_AUX = 1
 MAZDA_CAM = 2
 
 MAZDA_2019_ACC = 0x220
+MAZDA_2019_ACC_2 = 0x222
 MAZDA_TI_LKAS = 0x249
 
 
@@ -209,6 +212,83 @@ class TestMazdaGen2TiSafety(TestMazdaGen2Safety):
     for addr in [0, MAZDA_TI_LKAS, 0x220, 0x7ff]:
       self.assertEqual(-1, self.safety.safety_fwd_hook(MAZDA_AUX, addr))
 
+class TestMazdaGen2LowSpeedProbe(TestMazdaGen2Safety):
+  # Low-speed longitudinal probe: engagement authority additionally follows the OEM ACC_2.ACC_ENABLED
+  # bit (0x222) so controls_allowed persists below the CRZ_STATE display floor. All base GEN2 safety
+  # behavior must remain unchanged when ACC_2 authority is absent (acc2_authority defaults False).
+  FLAGS = FLAG_MAZDA_GEN2 | FLAG_MAZDA_LOWSPEED_LONG
+
+  def _acc2_msg(self, enabled, not_enabled=False):
+    dat = bytearray(8)
+    if enabled:
+      dat[2] |= 0x04  # ACC_2.ACC_ENABLED
+    if not_enabled:
+      dat[0] |= 0x02  # ACC_2.ACC_NOT_ENABLED
+    return libsafety_py.make_CANPacket(MAZDA_2019_ACC_2, MAZDA_CAM, bytes(dat))
+
+  def _send_valid_gen2_rx(self, speed_msg):
+    super()._send_valid_gen2_rx(speed_msg)
+    self.assertTrue(self._rx(self._acc2_msg(True)))
+
+  def test_acc2_authority_engages_below_crz_floor(self):
+    # OEM ACC_2 authority present while CRZ_STATE is NOT engaged -> controls allowed (low-speed hold)
+    self.safety.set_controls_allowed(0)
+    self._rx(self._pcm_status_msg(False))   # establish cruise_engaged_prev = not engaged
+    self._rx(self._acc2_msg(True))          # OEM authority on
+    self._rx(self._pcm_status_msg(False))   # CRZ still not engaged -> engage via ACC_2 authority
+    self.assertTrue(self.safety.get_controls_allowed())
+
+  def test_acc2_not_enabled_blocks_authority(self):
+    # ACC_NOT_ENABLED overrides ACC_ENABLED -> no authority -> not engaged
+    self.safety.set_controls_allowed(0)
+    self._rx(self._pcm_status_msg(False))
+    self._rx(self._acc2_msg(True, not_enabled=True))
+    self._rx(self._pcm_status_msg(False))
+    self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_acc2_authority_lost_disengages(self):
+    self._rx(self._pcm_status_msg(False))
+    self._rx(self._acc2_msg(True))
+    self._rx(self._pcm_status_msg(False))
+    self.assertTrue(self.safety.get_controls_allowed())
+    self._rx(self._acc2_msg(False))         # authority lost -> disengage on next cruise frame
+    self._rx(self._pcm_status_msg(False))
+    self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_acc2_required_in_rx_checks(self):
+    # With everything fresh INCLUDING ACC_2 the config is valid
+    self._send_valid_gen2_rx(self._speed_msg(1.0))
+    self.safety.set_timer(1000)
+    self.safety.safety_tick_current_safety_config()
+    self.assertTrue(self.safety.safety_config_valid())
+
+
+class TestMazdaGen2LongAccel(unittest.TestCase):
+  # Focused coverage for the GEN2 openpilot-longitudinal ACCEL_CMD TX safety check (FLAG_MAZDA_LONG).
+  # The low-speed probe always runs under op-long, so this path is exercised in production. Standalone
+  # (no generic CarSafetyTest inheritance) to avoid the base ACC-tx tests' zero-accel assumptions.
+  def setUp(self):
+    self.packer = CANPackerSafety("mazda_2019")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.mazda, FLAG_MAZDA_GEN2 | FLAG_MAZDA_LONG)
+    self.safety.init_tests()
+
+  def _acc_tx(self, accel_raw):
+    # ACCEL_CMD raw = accel*200 + 2000; limits [1300, 2400], inactive 2000 (MAZDA_2019_LONG_LIMITS).
+    return self.packer.make_can_msg_safety("ACC", MAZDA_CAM, {"ACCEL_CMD": accel_raw})
+
+  def test_accel_cmd_limits_when_allowed(self):
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self.safety.safety_tx_hook(self._acc_tx(2000)))   # inactive
+    self.assertTrue(self.safety.safety_tx_hook(self._acc_tx(1300)))   # min
+    self.assertTrue(self.safety.safety_tx_hook(self._acc_tx(2400)))   # max
+    self.assertFalse(self.safety.safety_tx_hook(self._acc_tx(1299)))  # below min blocked
+    self.assertFalse(self.safety.safety_tx_hook(self._acc_tx(2401)))  # above max blocked
+
+  def test_accel_cmd_inactive_only_when_not_allowed(self):
+    self.safety.set_controls_allowed(False)
+    self.assertTrue(self.safety.safety_tx_hook(self._acc_tx(2000)))   # inactive sentinel ok
+    self.assertFalse(self.safety.safety_tx_hook(self._acc_tx(1500)))  # non-inactive blocked
 
 if __name__ == "__main__":
   unittest.main()

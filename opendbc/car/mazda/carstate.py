@@ -205,8 +205,14 @@ class CarState(CarStateBase):
 
     # Cruise. CRZ_STATE encodes: 0=off, >=1=available, >=2=engaged.
     ret.cruiseState.speed = cp.vl["CRUZE_STATE"]["CRZ_SPEED"] * unit_conversion
-    ret.cruiseState.enabled = cp.vl["CRUZE_STATE"]["CRZ_STATE"] >= 2
-    ret.cruiseState.available = cp.vl["CRUZE_STATE"]["CRZ_STATE"] != 0
+    # Low-speed longitudinal probe: also treat the OEM ACC_2.ACC_ENABLED authority bit as engaged/
+    # available so openpilot keeps longitudinal active below the CRZ_STATE display floor (the OEM radar
+    # keeps actuating to standstill). Mirrors the panda FLAG_MAZDA_LOWSPEED_LONG gate.
+    acc2_authority = False
+    if self.CP.flags & MazdaFlags.LOWSPEED_LONG:
+      acc2_authority = bool(cp_cam.vl["ACC_2"]["ACC_ENABLED"]) and not bool(cp_cam.vl["ACC_2"]["ACC_NOT_ENABLED"])
+    ret.cruiseState.enabled = cp.vl["CRUZE_STATE"]["CRZ_STATE"] >= 2 or acc2_authority
+    ret.cruiseState.available = cp.vl["CRUZE_STATE"]["CRZ_STATE"] != 0 or acc2_authority
     # Suppress standstill when openpilot is the longitudinal owner so the car
     # doesn't latch into a creep-stop loop fighting our own accel command.
     ret.cruiseState.standstill = ret.standstill if not self.CP.openpilotLongitudinalControl else False
@@ -243,6 +249,8 @@ class CarState(CarStateBase):
         ("SPEED", 50),
         ("GEAR", 40),
       ]
+      if CP.flags & MazdaFlags.LOWSPEED_LONG:
+        cam_messages.append(("ACC_2", 50))
       body_messages = [
         ("EPS_FEEDBACK", 50),
       ]

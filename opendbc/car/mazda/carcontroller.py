@@ -110,8 +110,13 @@ class CarController(CarControllerBase, IntelligentCruiseButtonManagementInterfac
         # When openpilot owns longitudinal (alpha_long opted in), force ACCEL_CMD to either the
         # commanded accel (longActive=True) or the inactive sentinel (longActive=False). When OPL
         # is off, op_long=False keeps the legacy stock-ACC pass-through behavior.
+        probe_accel = CC.actuators.accel
+        if (self.CP.flags & MazdaFlags.LOWSPEED_LONG) and CS.out.vEgo < 6.0:
+          # Controlled-test safeguard: keep low-speed probe braking gentle. Panda still hard-limits
+          # ACCEL_CMD to [-3.5, +2.0]; this decel-biased clamp avoids harsh braking during the probe.
+          probe_accel = max(-1.5, min(0.3, probe_accel))
         can_sends.append(mazdacan.create_acc_cmd(self.packer, CS.acc_values, hold, resume,
-                                                 accel=CC.actuators.accel,
+                                                 accel=probe_accel,
                                                  op_long=self.CP.openpilotLongitudinalControl,
                                                  long_active=CC.longActive))
 
