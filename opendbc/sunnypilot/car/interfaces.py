@@ -158,5 +158,5 @@ def _initialize_mazda(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_
   # CP.safetyConfigs[0].safetyParam (panda), while CP.flags is read by carstate/carcontroller.
   if CP.brand == 'mazda' and bool(CP.flags & MazdaFlags.GEN2) and CP.openpilotLongitudinalControl:
     if int(params_dict.get("MazdaGen2LowSpeedLong", 0)) == 1:
-      CP.flags |= MazdaFlags.LOWSPEED_LONG
+      CP.flags |= int(MazdaFlags.LOWSPEED_LONG)
       CP.safetyConfigs[0].safetyParam |= int(MazdaFlags.LOWSPEED_LONG)
