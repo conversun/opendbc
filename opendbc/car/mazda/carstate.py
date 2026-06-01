@@ -262,8 +262,13 @@ class CarState(CarStateBase):
       ]
       if CP.flags & MazdaFlags.LOWSPEED_LONG:
         cam_messages.append(("ACC_2", 50))
+      # EPS_FEEDBACK is the only message on the body bus (bus1). Without an aftermarket torque interceptor
+      # constantly transmitting there, bus1 carries only the stock EPS, which pauses output for ~260ms
+      # periodically. Declared at 20Hz (not its ~80Hz wire rate) so the opendbc bus_timeout AND per-message
+      # freshness thresholds both land at the 500ms cap ((10/20)s), tolerating that pause while still
+      # detecting real bus loss (>500ms). Panda enforces stricter (1s) RX liveness independently.
       body_messages = [
-        ("EPS_FEEDBACK", 50),
+        ("EPS_FEEDBACK", 20),
       ]
       return {
         Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
