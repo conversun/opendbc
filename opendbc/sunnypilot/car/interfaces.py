@@ -160,3 +160,11 @@ def _initialize_mazda(CP: structs.CarParams, CP_SP: structs.CarParamsSP, params_
     if int(params_dict.get("MazdaGen2LowSpeedLong", 0)) == 1:
       CP.flags |= int(MazdaFlags.LOWSPEED_LONG)
       CP.safetyConfigs[0].safetyParam |= int(MazdaFlags.LOWSPEED_LONG)
+
+  # GEN2 Torque Interceptor (MoreTorque TI2) add-on hardware. Bypasses the EPS minSteerSpeed lockout by
+  # injecting steering torque, enabling lateral control down to standstill. Independent of op-long.
+  # Requires the physical TI2 installed + a healthy ti_state (carstate gates torque on TI_STATE.RUN).
+  if CP.brand == 'mazda' and bool(CP.flags & MazdaFlags.GEN2):
+    if int(params_dict.get("MazdaTorqueInterceptor", 0)) == 1:
+      CP.flags |= int(MazdaFlags.TORQUE_INTERCEPTOR)
+      CP.safetyConfigs[0].safetyParam |= int(MazdaFlags.TORQUE_INTERCEPTOR)

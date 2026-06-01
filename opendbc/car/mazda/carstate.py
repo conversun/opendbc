@@ -2,7 +2,7 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, DT_CTRL, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.mazda.values import CarControllerParams, DBC, LKAS_LIMITS, MazdaFlags, TI_STATE
+from opendbc.car.mazda.values import CarControllerParams, DBC, LKAS_LIMITS, MazdaFlags, TI_STATE, TI_CPU_STATE_DRIVE
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -194,6 +194,17 @@ class CarState(CarStateBase):
     # default 0 (matching the source fork's GEN2 behavior).
     ret.steeringTorque = cp_aux.vl["EPS_FEEDBACK"]["STEER_TORQUE_SENSOR"]
     ret.steeringPressed = abs(ret.steeringTorque) > self.params.STEER_DRIVER_ALLOWANCE
+
+    if self.CP.flags & MazdaFlags.TORQUE_INTERCEPTOR:
+      # TI2 (MoreTorque GEN2) reports per-MCU state/violations in EPS_FEEDBACK (no single STATE field like
+      # the v1 TI_FEEDBACK 0x24A, which this hardware does not emit). FAIL-SAFE: only reach RUN (which lets
+      # the carcontroller apply TI steer torque) when all 4 interceptor CPUs report the drive state with
+      # zero violations; otherwise stay non-RUN so torque is gated off. TI_CPU_STATE_DRIVE is INFERRED
+      # (see values.py) and must be confirmed on healthy TI2 hardware before relying on it.
+      fb = cp_aux.vl["EPS_FEEDBACK"]
+      states_drive = all(int(fb[f"CPU_{i}_STATE"]) == TI_CPU_STATE_DRIVE for i in range(4))
+      no_viol = all(int(fb[f"CPU_{i}_VIOL"]) == 0 for i in range(4))
+      self.ti_state = TI_STATE.RUN if (states_drive and no_viol) else TI_STATE.OFF
 
     # Throttle / brake. GEN2 ENGINE_DATA on the camera bus carries the gas pedal;
     # brake comes back as a binary signal on BRAKE_PEDAL (no analog pressure

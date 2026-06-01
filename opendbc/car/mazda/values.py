@@ -168,6 +168,12 @@ class TI_STATE(IntEnum):
   DRIVER_OVER = 2
   RUN = 3
 
+# TI2 (MoreTorque GEN2) per-MCU "drive/actuating" value of EPS_FEEDBACK CPU_*_STATE. INFERRED from the
+# TI2 docs state machine (OFF->INIT->STANDBY->DRIVE) and device CAN captures (healthy cores read 3).
+# Used FAIL-SAFE: ti_state only reaches RUN when ALL 4 CPUs report this state with zero violations, so
+# a wrong value merely keeps TI disengaged (never falsely engages). Verify on healthy TI2 hardware.
+TI_CPU_STATE_DRIVE = 3
+
 
 FW_QUERY_CONFIG = FwQueryConfig(
   requests=[
