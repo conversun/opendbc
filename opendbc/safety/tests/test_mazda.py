@@ -8,6 +8,7 @@ from opendbc.safety.tests.common import CANPackerSafety, make_msg
 
 FLAG_MAZDA_GEN2 = 2
 FLAG_MAZDA_TORQUE_INTERCEPTOR = 8
+FLAG_MAZDA_LONG = 16
 
 MAZDA_MAIN = 0
 MAZDA_AUX = 1
@@ -207,6 +208,27 @@ class TestMazdaGen2TiSafety(TestMazdaGen2Safety):
   def test_aux_bus_not_forwarded(self):
     for addr in [0, MAZDA_TI_LKAS, 0x220, 0x7ff]:
       self.assertEqual(-1, self.safety.safety_fwd_hook(MAZDA_AUX, addr))
+
+
+class TestMazdaGen2LongSafety(TestMazdaGen2Safety, common.LongitudinalAccelSafetyTest):
+  # FLAG_MAZDA_LONG enables ACCEL_CMD validation against MAZDA_2019_LONG_LIMITS.
+  # Mixin defaults (MAX_ACCEL=2.0, MIN_ACCEL=-3.5, INACTIVE_ACCEL=0.0) map to the raw limits
+  # (2400 / 1300 / 2000) via the carcontroller encoding raw = accel * 200 + 2000.
+  FLAGS = FLAG_MAZDA_GEN2 | FLAG_MAZDA_LONG
+
+  def _accel_msg(self, accel: float):
+    # 12-bit ACCEL_CMD packed per mazda.h decode: data[2] bit0=MSB, data[3]=mid 8, data[4] bits7..5=low 3
+    raw = int(round(accel * 200 + 2000))
+    dat = bytearray(8)
+    dat[2] = (raw >> 11) & 0x01
+    dat[3] = (raw >> 3) & 0xFF
+    dat[4] = (raw & 0x07) << 5
+    return libsafety_py.make_CANPacket(MAZDA_2019_ACC, MAZDA_CAM, bytes(dat))
+
+  def test_gen2_acc_tx_allowed(self):
+    # with FLAG_MAZDA_LONG the ACCEL_CMD is validated; use the inactive accel for the allowed-bus check
+    self.assertTrue(self._tx(self._accel_msg(self.INACTIVE_ACCEL)))
+    self.assertFalse(self._tx(libsafety_py.make_CANPacket(MAZDA_2019_ACC, MAZDA_MAIN, b"\x00" * 8)))
 
 
 class TestMazdaIgnition(unittest.TestCase):
