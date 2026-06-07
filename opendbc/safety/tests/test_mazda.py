@@ -4,7 +4,7 @@ import unittest
 from opendbc.car.structs import CarParams
 from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
-from opendbc.safety.tests.common import CANPackerSafety
+from opendbc.safety.tests.common import CANPackerSafety, make_msg
 
 FLAG_MAZDA_GEN2 = 2
 FLAG_MAZDA_TORQUE_INTERCEPTOR = 8
@@ -89,7 +89,6 @@ class TestMazdaSafety(common.CarSafetyTest, common.DriverTorqueSteeringSafetyTes
     self.safety.set_controls_allowed(1)
     self.assertTrue(self._tx(self._button_msg(cancel=True)))
     self.assertTrue(self._tx(self._button_msg(resume=True)))
-
 
 
 class TestMazdaGen2Safety(common.CarSafetyTest, common.DriverTorqueSteeringSafetyTest):
@@ -209,6 +208,61 @@ class TestMazdaGen2TiSafety(TestMazdaGen2Safety):
     for addr in [0, MAZDA_TI_LKAS, 0x220, 0x7ff]:
       self.assertEqual(-1, self.safety.safety_fwd_hook(MAZDA_AUX, addr))
 
+
+class TestMazdaIgnition(unittest.TestCase):
+  TX_MSGS: list = []
+
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.safety.init_tests()
+
+  def _msg(self, byte0):
+    return make_msg(0, 0x9E, dat=bytes([byte0]) + b"\x00" * 7)
+
+  # 0x9E byte 0 high 3 bits == 6 (0xC0)
+  def test_ignition_on(self):
+    self.safety.ignition_can_hook(self._msg(0xC0))
+    self.assertTrue(self.safety.get_ignition_can())
+
+  def test_ignition_off(self):
+    self.safety.ignition_can_hook(self._msg(0xC0))
+    self.assertTrue(self.safety.get_ignition_can())
+    self.safety.ignition_can_hook(self._msg(0x20))
+    self.assertFalse(self.safety.get_ignition_can())
+
+
+class TestMazdaGen2Ignition(unittest.TestCase):
+  TX_MSGS: list = []
+
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.safety.init_tests()
+
+  def _msg(self, bus, byte5):
+    dat = bytearray(8)
+    dat[5] = byte5
+    return make_msg(bus, 0x274, dat=bytes(dat))
+
+  # 0x274 byte 5 bit 2 (0x4) set == ignition on; valid on bus 0 and bus 1
+  def test_ignition_on_bus0(self):
+    self.safety.ignition_can_hook(self._msg(0, 0x4))
+    self.assertTrue(self.safety.get_ignition_can())
+
+  def test_ignition_off_bus0(self):
+    self.safety.ignition_can_hook(self._msg(0, 0x4))
+    self.assertTrue(self.safety.get_ignition_can())
+    self.safety.ignition_can_hook(self._msg(0, 0x0))
+    self.assertFalse(self.safety.get_ignition_can())
+
+  def test_ignition_on_bus1(self):
+    self.safety.ignition_can_hook(self._msg(1, 0x4))
+    self.assertTrue(self.safety.get_ignition_can())
+
+  def test_ignition_off_bus1(self):
+    self.safety.ignition_can_hook(self._msg(1, 0x4))
+    self.assertTrue(self.safety.get_ignition_can())
+    self.safety.ignition_can_hook(self._msg(1, 0x0))
+    self.assertFalse(self.safety.get_ignition_can())
 
 if __name__ == "__main__":
   unittest.main()
