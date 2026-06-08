@@ -199,7 +199,6 @@ class CarState(CarStateBase):
     # here to match the source fork).
     ret.gasPressed = cp_cam.vl["ENGINE_DATA"]["PEDAL_GAS"] > 0
     ret.brakePressed = cp.vl["BRAKE_PEDAL"]["BRAKE_PRESSED"] == 1
-    ret.brake = 0.
 
     # Cruise. CRZ_STATE encodes: 0=off, >=1=available, >=2=engaged.
     ret.cruiseState.speed = cp.vl["CRUZE_STATE"]["CRZ_SPEED"] * unit_conversion
