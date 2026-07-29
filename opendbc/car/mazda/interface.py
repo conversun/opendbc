@@ -79,9 +79,7 @@ class CarInterface(CarInterfaceBase):
     if ret.flags & MazdaFlags.GEN2:
       ret.safetyConfigs[0].safetyParam |= int(MazdaFlags.GEN2)
       ret.steerActuatorDelay = 0.335
-      ret.startingState = True
       ret.stopAccel = -0.5
-      ret.vEgoStarting = 0.2
       ret.longitudinalActuatorDelay = 0.35  # gas is 0.25s, brake looks like 0.5
       # PI tuning matched to FrogPilot's GEN2 reference (selfdrive/car/mazda/interface.py:106-117 on
       # branch cn-mazda). GEN2's stock ACC ECU runs its own internal closed-loop on the desired
