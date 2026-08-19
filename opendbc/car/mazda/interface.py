@@ -81,12 +81,11 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.335
       ret.stopAccel = -0.5
       ret.longitudinalActuatorDelay = 0.35  # gas is 0.25s, brake looks like 0.5
-      # PI tuning matched to FrogPilot's GEN2 reference (selfdrive/car/mazda/interface.py:106-117 on
+      # I tuning matched to FrogPilot's GEN2 reference (selfdrive/car/mazda/interface.py:106-117 on
       # branch cn-mazda). GEN2's stock ACC ECU runs its own internal closed-loop on the desired
-      # accel, so OP's outer PI uses kp=0 (pure integral) with low ki to avoid two PIDs fighting
-      # and producing high-frequency oscillation. Empirically tuned on Mazda 3 2019 GEN2.
-      ret.longitudinalTuning.kpBP = [0., 5., 35.]
-      ret.longitudinalTuning.kpV = [0.0, 0.0, 0.0]
+      # accel, so the outer loop is pure integral with low ki, to avoid two PIDs fighting and
+      # producing high-frequency oscillation. Empirically tuned on Mazda 3 2019 GEN2.
+      # kpBP/kpV are gone: LongControl hardcodes k_p=0, which is what this port set anyway.
       ret.longitudinalTuning.kiBP = [0., 35.]
       ret.longitudinalTuning.kiV = [0.1, 0.1]
 
