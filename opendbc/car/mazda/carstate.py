@@ -241,7 +241,13 @@ class CarState(CarStateBase):
         ("GEAR", 40),
       ]
       body_messages = [
-        ("EPS_FEEDBACK", 50),
+        # Declared 10Hz on purpose. The EPS transmits 0x24B in bursts when the wheel is idle:
+        # measured on a Mazda 3 2019 in P, ~80Hz average with inter-arrival gaps up to 282ms.
+        # At a declared 50Hz the parser timeout is 200ms (10x period), so every gap flipped
+        # canValid/bus-timeout and flashed "CAN Bus Disconnected" at standstill, ~1.5x/s.
+        # 10Hz -> 1s message timeout (bus timeout stays at the 500ms cap), 3.5x margin on the
+        # measured worst case. While steering is active the stream is a steady 50-100Hz.
+        ("EPS_FEEDBACK", 10),
       ]
       return {
         Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
